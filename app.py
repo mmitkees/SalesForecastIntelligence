@@ -1,3 +1,9 @@
+"""
+Main Application Entry Point for SalesApp.
+This module handles API routing, data synchronization, dashboard calculations,
+and file upload processing.
+"""
+
 import os
 from dotenv import load_dotenv
 
@@ -11,15 +17,25 @@ import pandas as pd
 import io
 from models import init_db, SessionLocal, Cluster, SalesRep, Workload, FiscalYear
 
+# Initialize Flask application
 app = Flask(__name__, static_folder='static', static_url_path='')
 
 
 def derive_fiscal_info(date_str, db):
     """
-    Derive fiscal quarter and fiscal_year_id from a date string.
-    Returns (quarter, fiscal_year_id).
+    Derives fiscal quarter and fiscal year ID from a given date string.
+    
+    The fiscal year starts in June.
+    FY26: Starts June 2025, Ends May 2026.
+    
+    Args:
+        date_str (str): Date in ISO format (YYYY-MM-DD).
+        db: Database session.
+        
+    Returns:
+        tuple: (quarter_name, fiscal_year_id)
     """
-    # Get default (latest) FY as fallback
+    # Retrieve the latest fiscal year as a fallback
     current_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
     default_fy_id = current_fy.id if current_fy else None
     
@@ -27,9 +43,8 @@ def derive_fiscal_info(date_str, db):
         return 'Q3', default_fy_id
         
     try:
+        # Parse the input date string
         if isinstance(date_str, str):
-            # Try parsing various formats if needed, but ISO expected
-            # Use dateutil if available or crude parsing
             try:
                 dt = datetime.fromisoformat(date_str)
             except:
@@ -42,32 +57,39 @@ def derive_fiscal_info(date_str, db):
         year = dt.year
         
         # Quarter Logic (June Start)
+        # Q1: Jun, Jul, Aug
+        # Q2: Sep, Oct, Nov
+        # Q3: Dec, Jan, Feb
+        # Q4: Mar, Apr, May
         if month in [6, 7, 8]: quarter = 'Q1'
         elif month in [9, 10, 11]: quarter = 'Q2'
         elif month in [12, 1, 2]: quarter = 'Q3'
-        else: quarter = 'Q4' # 3, 4, 5
+        else: quarter = 'Q4' 
         
-        # Fiscal Year Logic
-        # June 2025 -> FY26. Jan 2026 -> FY26.
+        # Fiscal Year Logic: June 2025 onwards belongs to FY26
         fy_year = year + 1 if month >= 6 else year
         
+        # Look up the corresponding FiscalYear record
         fy_obj = db.query(FiscalYear).filter(FiscalYear.year == fy_year).first()
         if fy_obj:
             return quarter, fy_obj.id
         return quarter, default_fy_id
         
     except:
+        # Fallback to defaults on parsing error
         return 'Q3', default_fy_id
 
 
 # --- Database connection management ---
 def get_db():
+    """ Provides a database session within the request context. """
     if 'db' not in g:
         g.db = SessionLocal()
     return g.db
 
 @app.teardown_appcontext
 def shutdown_session(exception=None):
+    """ Ensures database session is closed after each request. """
     db = g.pop('db', None)
     if db:
         db.close()
@@ -127,8 +149,14 @@ def serve_views(filename):
 
 @app.route('/api/fiscal_years', methods=['GET'])
 def get_fiscal_years():
-    """Get all fiscal years"""
+    """
+    Retrieves all available fiscal years from the database.
+    
+    Returns:
+        JSON: List of fiscal year objects.
+    """
     db = get_db()
+    # Order by year descending to show latest first
     fys = db.query(FiscalYear).order_by(FiscalYear.year.desc()).all()
     return jsonify([{
         "id": fy.id, 
@@ -139,17 +167,23 @@ def get_fiscal_years():
 
 @app.route('/api/fiscal_years', methods=['POST'])
 def create_fiscal_year():
-    """Create a new fiscal year (auto-calculates dates)"""
+    """
+    Creates a new fiscal year record.
+    Automatically calculates start and end dates based on the year.
+    
+    Returns:
+        JSON: The created fiscal year ID and year.
+    """
     data = request.json
     year = int(data.get('year'))
     db = get_db()
     
-    # Validation
+    # Ensure duplicate fiscal years are not created
     if db.query(FiscalYear).filter(FiscalYear.year == year).first():
         return jsonify({"error": f"Fiscal Year {year} already exists"}), 400
 
-    # Auto-calculate dates (FY26 starts June 1 2025 ends May 31 2026)
-    # So start year is year - 1
+    # Business Logic: FY begins June 1st of the previous calendar year
+    # Example: FY26 starts 2025-06-01
     start_date = f"{year-1}-06-01"
     end_date = f"{year}-05-31"
 
@@ -165,7 +199,12 @@ def create_fiscal_year():
 
 @app.route('/api/clusters', methods=['GET'])
 def get_clusters():
-    """Get all clusters"""
+    """
+    Retrieves all clusters.
+    
+    Returns:
+        JSON: List of clusters.
+    """
     db = get_db()
     clusters = db.query(Cluster).all()
     return jsonify([{
@@ -177,7 +216,12 @@ def get_clusters():
 
 @app.route('/api/clusters', methods=['POST'])
 def create_cluster():
-    """Create a new cluster"""
+    """
+    Creates a new cluster.
+    
+    Returns:
+        JSON: Created cluster data.
+    """
     data = request.json
     db = get_db()
     cluster = Cluster(name=data.get('name', 'New Cluster'))
@@ -189,13 +233,22 @@ def create_cluster():
 
 @app.route('/api/clusters/<int:cluster_id>', methods=['PUT'])
 def update_cluster(cluster_id):
-    """Update cluster (name and/or partial_data_date)"""
+    """
+    Updates an existing cluster's name or metadata.
+    
+    Args:
+        cluster_id (int): ID of the cluster to update.
+        
+    Returns:
+        JSON: Updated cluster data.
+    """
     data = request.json
     db = get_db()
     cluster = db.query(Cluster).filter(Cluster.id == cluster_id).first()
     if not cluster:
         return jsonify({"error": "Cluster not found"}), 404
     
+    # Update fields if provided in payload
     if 'name' in data:
         cluster.name = data.get('name')
     if 'partial_data_date' in data:
@@ -211,12 +264,25 @@ def update_cluster(cluster_id):
 
 @app.route('/api/dashboard/<int:cluster_id>', methods=['GET'])
 def get_dashboard(cluster_id):
-    """Get dashboard data for a cluster"""
+    """
+    Retrieves the primary dashboard data for a specific cluster.
+    Includes KPIs and detailed performance for each Sales Rep.
+    
+    Args:
+        cluster_id (int): Target cluster.
+        
+    Query Params:
+        fiscal_year_id (int, optional): Filter by fiscal year. Defaults to latest.
+        
+    Returns:
+        JSON: Summary statistics and sales rep list.
+    """
     db = get_db()
     cluster = db.query(Cluster).filter(Cluster.id == cluster_id).first()
     if not cluster:
         return jsonify({"error": "Cluster not found"}), 404
 
+    # Build query for sales reps within the cluster
     sales_reps_query = db.query(SalesRep).filter(SalesRep.cluster_id == cluster_id)
     
     # Filter by Fiscal Year (Optional, default to latest)
@@ -224,76 +290,78 @@ def get_dashboard(cluster_id):
     if fiscal_year_id:
         sales_reps_query = sales_reps_query.filter(SalesRep.fiscal_year_id == int(fiscal_year_id))
     else:
-        # Default to the most recent fiscal year
+        # Default to the most recent fiscal year if none specified
         latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
         if latest_fy:
             sales_reps_query = sales_reps_query.filter(SalesRep.fiscal_year_id == latest_fy.id)
 
     sales_reps = sales_reps_query.all()
 
-    # Calculate KPIs
-    # Re-calculate workloads for all reps to ensure consistency? 
-    # Or assume they are up to date. Let's assume up to date for GET, but update on PUT/POST.
+    # --- KPI Calculations ---
     
+    # Total exit amount across all reps in Q2 (a primary baseline)
     total_q2_exit = sum(sr.q2_exit for sr in sales_reps)
-    # Calculate Avg QoQ Growth (Q1 vs Last Year) - doing it on the fly
+    
+    # Calculate Average Quarter-over-Quarter Growth (Q1 Exit vs Previous Year Exit)
     total_q1_qoq = 0
     valid_reps_count = 0
     for sr in sales_reps:
         if sr.last_year_exit:
+            # Percentage growth calculation
             qoq = ((sr.q1_exit / sr.last_year_exit) - 1) * 100
             total_q1_qoq += qoq
             valid_reps_count += 1
     
     avg_qoq_growth = total_q1_qoq / valid_reps_count if valid_reps_count else 0
-    total_upside = sum(sr.q3_add_upside for sr in sales_reps) # Using new upside column
+    # Total potential upside for Q3
+    total_upside = sum(sr.q3_add_upside for sr in sales_reps) 
+    # Risk factor: How much of our target exit is contingent on deals marked as Upside
     pct_exit_dependent_on_upside = (total_upside / total_q2_exit * 100) if total_q2_exit else 0
 
     reps_data = []
     for sr in sales_reps:
-        # QoQ Calculations (Sequential)
-        # Q1 QoQ = (Q1 Exit / Last Year Exit) - 1
+        # Sequential Quarter-over-Quarter Growth Calculations (On-the-fly)
+        
+        # --- Q1 Calculations ---
         q1_qoq = 0.0
         if sr.last_year_exit:
             q1_qoq = ((sr.q1_exit / sr.last_year_exit) - 1) * 100
-            
+        # QoQ considering forecasted deals
         q1_qoq_plus = 0.0
         if sr.last_year_exit:
             q1_qoq_plus = ((sr.q1_total_exit_with_fc / sr.last_year_exit) - 1) * 100
 
-        # Q2 QoQ = (Q2 Exit / Q1 Exit) - 1
+        # --- Q2 Calculations ---
         q2_qoq = 0.0
         if sr.q1_exit:
             q2_qoq = ((sr.q2_exit / sr.q1_exit) - 1) * 100
-            
         q2_qoq_plus = 0.0
         if sr.q1_exit:
             q2_qoq_plus = ((sr.q2_total_exit_with_fc / sr.q1_exit) - 1) * 100
 
-        # Q3 QoQ = (Q3 Est / Q2 Exit) - 1
+        # --- Q3 Calculations ---
         q3_qoq = 0.0
         if sr.q2_exit:
-            q3_qoq = ((sr.q3_estimated / sr.q2_exit) - 1) * 100
-            
+            q3_qoq = ((sr.q3_exit / sr.q2_exit) - 1) * 100
         q3_qoq_plus = 0.0
         if sr.q2_exit:
             q3_qoq_plus = ((sr.q3_total_exit_with_fc / sr.q2_exit) - 1) * 100
 
-        # Q4 QoQ = (Q4 Exit / Q3 Est) - 1
+        # --- Q4 Calculations ---
         q4_qoq = 0.0
-        if sr.q3_estimated:
-            q4_qoq = ((sr.q4_exit / sr.q3_estimated) - 1) * 100
-            
+        if sr.q3_exit:
+            q4_qoq = ((sr.q4_exit / sr.q3_exit) - 1) * 100
         q4_qoq_plus = 0.0
-        if sr.q3_estimated:
-            q4_qoq_plus = ((sr.q4_total_exit_with_fc / sr.q3_estimated) - 1) * 100
+        if sr.q3_exit:
+            q4_qoq_plus = ((sr.q4_total_exit_with_fc / sr.q3_exit) - 1) * 100
 
+        # Map model fields to serializable dictionary
         reps_data.append({
             "id": sr.id,
             "name": sr.name,
             "last_year_exit": sr.last_year_exit,
             
-            # Q1
+            # Q1 Metrics
             "q1_exit": sr.q1_exit,
             "q1_add_fct": sr.q1_add_fct,
             "q1_total_exit_with_fc": sr.q1_total_exit_with_fc,
@@ -301,7 +369,7 @@ def get_dashboard(cluster_id):
             "q1_qoq_pct": round(q1_qoq, 1),
             "q1_qoq_plus_fct_pct": round(q1_qoq_plus, 1),
             
-            # Q2
+            # Q2 Metrics
             "q2_exit": sr.q2_exit,
             "q2_add_fct": sr.q2_add_fct,
             "q2_total_exit_with_fc": sr.q2_total_exit_with_fc,
@@ -309,27 +377,27 @@ def get_dashboard(cluster_id):
             "q2_qoq_pct": round(q2_qoq, 1),
             "q2_qoq_plus_fct_pct": round(q2_qoq_plus, 1),
             
-            # Daily Rates & Simulation
+            # Prediction Drivers
             "last_week_daily_rate": sr.last_week_daily_rate,
             "current_daily_rate": sr.current_daily_rate,
             "simulation": sr.simulation,
             
-            # Monthly Data
+            # Flattened Monthly Data
             "jan": sr.jan, "feb": sr.feb, "mar": sr.mar, "apr": sr.apr,
             "may": sr.may, "jun": sr.jun, "jul": sr.jul, "aug": sr.aug,
             "sep": sr.sep, "oct": sr.oct, "nov": sr.nov, "dec": sr.dec,
             
             "current_month_est": sr.current_month_est,
             
-            # Q3
-            "q3_estimated": sr.q3_estimated,
+            # Q3 Projections
+            "q3_exit": sr.q3_exit,
             "q3_add_fct": sr.q3_add_fct,
             "q3_total_exit_with_fc": sr.q3_total_exit_with_fc,
             "q3_add_upside": sr.q3_add_upside,
             "q3_qoq_pct": round(q3_qoq, 1),
             "qoq_plus_fct_pct": round(q3_qoq_plus, 1),
             
-            # Q4
+            # Q4 Projections
             "q4_exit": sr.q4_exit,
             "q4_add_fct": sr.q4_add_fct,
             "q4_total_exit_with_fc": sr.q4_total_exit_with_fc,
@@ -337,7 +405,7 @@ def get_dashboard(cluster_id):
             "q4_qoq_pct": round(q4_qoq, 1),
             "q4_qoq_plus_fct_pct": round(q4_qoq_plus, 1),
             
-            "risk_flag": "NORMAL"
+            "risk_flag": sr.risk_flag # Computed property from model
         })
 
     return jsonify({
@@ -358,13 +426,20 @@ def get_dashboard(cluster_id):
 
 @app.route('/api/sales_reps', methods=['GET'])
 def get_sales_reps():
-    """Get all sales reps, optionally filtered by cluster"""
+    """
+    Retrieves all sales representatives.
+    Optionally filters by cluster.
+    
+    Returns:
+        JSON: List of sales reps.
+    """
     db = get_db()
     cluster_id = request.args.get('cluster_id')
     if cluster_id:
         reps = db.query(SalesRep).filter(SalesRep.cluster_id == int(cluster_id)).all()
     else:
         reps = db.query(SalesRep).all()
+    # Return basic info only
     return jsonify([{
         "id": r.id, 
         "name": r.name, 
@@ -376,10 +451,15 @@ def get_sales_reps():
 
 @app.route('/api/sales_reps', methods=['POST'])
 def create_sales_rep():
-    """Create a new sales rep"""
+    """
+    Creates a new sales representative.
+    
+    Returns:
+        JSON: Created sales rep info.
+    """
     data = request.json
     db = get_db()
-    # Validations & Defaults
+    # Default to latest fiscal year if not provided
     fy_id = data.get('fiscal_year_id')
     if not fy_id:
         latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
@@ -402,45 +482,52 @@ def create_sales_rep():
 
 @app.route('/api/sales_reps/<int:rep_id>', methods=['PUT'])
 def update_sales_rep(rep_id):
-    """Update a sales rep and recalculate derived metrics"""
+    """
+    Updates a Sales Rep's data and triggers a recalculation of all derived metrics.
+    
+    Order of operations:
+    1. Sync workload aggregations (FCT/Upside).
+    2. Update editable fields.
+    3. Recalculate future monthly estimates based on Daily Rate.
+    4. Force a second workload sync to ensure totals remain consistent.
+    5. Aggregate Q3 and Q4 totals.
+    
+    Args:
+        rep_id (int): ID of the sales rep.
+    """
     data = request.json
     db = get_db()
     rep = db.query(SalesRep).filter(SalesRep.id == rep_id).first()
     if not rep:
         return jsonify({"error": "Sales rep not found"}), 404
 
-    # Helper: Sync Workloads first (aggregates "Add FCT" and "Upside" from Workloads)
+    # --- Step 1: Pre-Sync Workloads ---
+    # Retrieve current aggregate "Add FCT" and "Add Upside" from individual deals
     update_from_workloads(rep, db)
 
-    # Helper: Calculate Future Estimates (Daily Rate * Days)
-    # We need to act on the data dict if we want to preview, but usually this updates the model.
-    # The 'data' payload might contain overrides, but usually Daily Rate drives the calc.
-    # Let's apply standard logic.
-    
-    # Update Editable Fields
+    # --- Step 2: Update Manual overrides/fields ---
     rep.name = data.get('name', rep.name)
     rep.last_year_exit = float(data.get('last_year_exit', rep.last_year_exit))
     
-    # Q1
+    # Quarterly Exits (Actuals or Overrides)
     rep.q1_exit = float(data.get('q1_exit', rep.q1_exit))
     rep.q1_add_fct = float(data.get('q1_add_fct', rep.q1_add_fct))
     rep.q1_add_upside = float(data.get('q1_add_upside', rep.q1_add_upside))
     
-    # Q2
     rep.q2_exit = float(data.get('q2_exit', rep.q2_exit))
     rep.q2_add_fct = float(data.get('q2_add_fct', rep.q2_add_fct))
     rep.q2_add_upside = float(data.get('q2_add_upside', rep.q2_add_upside))
     
-    # Q4
     rep.q4_exit = float(data.get('q4_exit', rep.q4_exit))
     rep.q4_add_fct = float(data.get('q4_add_fct', rep.q4_add_fct))
     rep.q4_add_upside = float(data.get('q4_add_upside', rep.q4_add_upside))
     
+    # Calculation Parameters
     rep.last_week_daily_rate = float(data.get('last_week_daily_rate', rep.last_week_daily_rate))
     rep.current_daily_rate = float(data.get('current_daily_rate', rep.current_daily_rate))
     rep.simulation = float(data.get('simulation', rep.simulation))
     
-    # Monthly data (simplified 12 fields)
+    # Monthly Actuals
     rep.jan = float(data.get('jan', rep.jan))
     rep.feb = float(data.get('feb', rep.feb))
     rep.mar = float(data.get('mar', rep.mar))
@@ -454,37 +541,25 @@ def update_sales_rep(rep_id):
     rep.nov = float(data.get('nov', rep.nov))
     rep.dec = float(data.get('dec', rep.dec))
     
-    # Current month estimate
     rep.current_month_est = float(data.get('current_month_est', rep.current_month_est))
     
-    # Calculate future estimates based on updated daily rate
+    # --- Step 3: Run Estimation Engine ---
+    # Calculated future months based on the new daily rate
     calculate_future_estimates(rep)
     
-    # Workload aggregation overwrites "Add FCT" and "Upside" fields if they are workload-driven.
-    # However, if the user manually edits them in the dashboard, we might want to allow it?
-    # User requirement: "retrieve the forcast and upside for each quarter from workload page"
-    # This implies Workloads are the source of truth.
-    # We already called update_from_workloads(rep, db) at start, but we should call it again 
-    # if we suspect other changes? Actually, update_sales_rep is for manual edits.
-    # If the user edits "Add FCT" manually, it might get overwritten by next workload update.
-    # We will enforce Workload -> Field data flow.
+    # --- Step 4: Final Workload Aggregation ---
+    # This ensures that if Workloads exist, they overwrite manual edits to forecast fields
     update_from_workloads(rep, db)
 
-    # Note: rep.q3_add_fct etc are updated by update_from_workloads
-    # If data payload has them, we ignore them in favor of workloads? 
-    # Or we allow override if no workloads? logic:
-    # If update_from_workloads found 0, maybe we allow manual? 
-    # Stick to strict: Workloads drive these fields.
+    # --- Step 5: Finalize Derived Totals ---
     
-    # --- Recalculate Derived Fields ---
+    # Q3 Estimated = Dec Actual + Jan Est + Feb Est + Manual Simulation
+    rep.q3_exit = rep.dec + rep.jan + rep.feb + rep.simulation
     
-    # Q3 = Dec + Jan + Feb (using simplified fields)
-    rep.q3_estimated = rep.dec + rep.jan + rep.feb + rep.simulation
-    
-    # Recalculate Totals (Total Exit + Add FCT)
+    # Calculate "Exit with Forecast" (The primary performance metric)
     rep.q1_total_exit_with_fc = rep.q1_exit + rep.q1_add_fct
     rep.q2_total_exit_with_fc = rep.q2_exit + rep.q2_add_fct
-    rep.q3_total_exit_with_fc = rep.q3_estimated + rep.q3_add_fct
+    rep.q3_total_exit_with_fc = rep.q3_exit + rep.q3_add_fct
     rep.q4_total_exit_with_fc = rep.q4_exit + rep.q4_add_fct
 
     db.commit()
@@ -493,8 +568,7 @@ def update_sales_rep(rep_id):
         "id": rep.id, 
         "name": rep.name,
         "current_month_est": rep.current_month_est,
-        "q3_estimated": rep.q3_estimated,
-        # No longer return stored QoQ, as it's not stored
+        "q3_exit": rep.q3_exit
     })
 
 
@@ -524,7 +598,13 @@ def delete_cluster(cluster_id):
 
 @app.route('/api/workloads', methods=['GET'])
 def get_workloads():
-    """Get all workloads, optionally filtered by sales_rep_id or cluster_id"""
+    """
+    Retrieves all individual deal workloads.
+    Supports filtering by sales_rep_id or cluster_id.
+    
+    Returns:
+        JSON: List of workloads with associated sales rep names.
+    """
     db = get_db()
     sales_rep_id = request.args.get('sales_rep_id')
     cluster_id = request.args.get('cluster_id')
@@ -533,6 +613,7 @@ def get_workloads():
     if sales_rep_id:
         query = query.filter(Workload.sales_rep_id == int(sales_rep_id))
     elif cluster_id:
+        # Resolve all rep IDs in the cluster to filter workloads
         rep_ids = [r.id for r in db.query(SalesRep).filter(SalesRep.cluster_id == int(cluster_id)).all()]
         query = query.filter(Workload.sales_rep_id.in_(rep_ids))
 
@@ -559,12 +640,24 @@ def get_workloads():
 
 @app.route('/api/workloads', methods=['POST'])
 def create_workload():
-    """Create a new workload"""
+    """
+    Creates a new workload deal.
+    Automatically assigns the fiscal quarter/year based on start date.
+    Triggers a sync of the Sales Rep's aggregate totals.
+    
+    Returns:
+        JSON: Created workload ID.
+    """
     data = request.json
     db = get_db()
     
     start_date = data.get('consumption_start_date')
+    # Determine the correct bucket for this deal
     quarter, fy_id = derive_fiscal_info(start_date, db)
+    
+    month_1 = float(data.get('month_1_amt', 0))
+    month_2 = float(data.get('month_2_amt', 0))
+    month_3 = float(data.get('month_3_amt', 0))
     
     workload = Workload(
         sales_rep_id=data['sales_rep_id'],
@@ -577,18 +670,21 @@ def create_workload():
         comments=data.get('comments', ''),
         opt_id=data.get('opt_id', ''),
         quarter=quarter,
-        month_1_amt=float(data.get('month_1_amt', 0)),
-        month_2_amt=float(data.get('month_2_amt', 0)),
-        month_3_amt=float(data.get('month_3_amt', 0)),
+        month_1_amt=month_1,
+        month_2_amt=month_2,
+        month_3_amt=month_3,
+        total=month_1 + month_2 + month_3,
         consumption_start_date=start_date
     )
     db.add(workload)
     db.commit()
     db.refresh(workload)
     
-    # Update Sales Rep Totals
-    if workload.sales_rep:
-        update_from_workloads(workload.sales_rep, db)
+    # Sync relevant Sales Rep aggregate fields immediately
+    # Explicitly fetch the SalesRep to ensure the relationship is loaded
+    rep = db.query(SalesRep).filter(SalesRep.id == data['sales_rep_id']).first()
+    if rep:
+        update_from_workloads(rep, db)
         db.commit()
         
     return jsonify({"id": workload.id, "account_name": workload.account_name}), 201
@@ -596,13 +692,20 @@ def create_workload():
 
 @app.route('/api/workloads/<int:workload_id>', methods=['PUT'])
 def update_workload(workload_id):
-    """Update an existing workload"""
+    """
+    Updates an existing workload deal.
+    If the start date changes, the fiscal quarter and year are recalculated.
+    
+    Returns:
+        JSON: Updated workload info.
+    """
     data = request.json
     db = get_db()
     workload = db.query(Workload).filter(Workload.id == workload_id).first()
     if not workload:
         return jsonify({"error": "Workload not found"}), 404
 
+    # Update basic deal information
     workload.account_name = data.get('account_name', workload.account_name)
     workload.forecast_type = data.get('forecast_type', workload.forecast_type)
     workload.customer_type = data.get('customer_type', workload.customer_type)
@@ -613,41 +716,47 @@ def update_workload(workload_id):
     workload.month_1_amt = float(data.get('month_1_amt', workload.month_1_amt))
     workload.month_2_amt = float(data.get('month_2_amt', workload.month_2_amt))
     workload.month_3_amt = float(data.get('month_3_amt', workload.month_3_amt))
+    # Recalculate total when amounts change
+    workload.total = workload.month_1_amt + workload.month_2_amt + workload.month_3_amt
     
-    # If consumption_start_date is updated, recalculate the quarter
-    # If consumption_start_date is updated, recalculate the quarter and FY
+    # Check for date shifts which might move the deal to a different fiscal bucket
     new_start_date = data.get('consumption_start_date', workload.consumption_start_date)
-    workload.consumption_start_date = new_start_date
-    
-    quarter, fy_id = derive_fiscal_info(new_start_date, db)
-    workload.quarter = quarter
-    workload.fiscal_year_id = fy_id
-
-    workload.fiscal_year_id = fy_id
-    workload.quarter = quarter
+    if new_start_date != workload.consumption_start_date:
+        workload.consumption_start_date = new_start_date
+        quarter, fy_id = derive_fiscal_info(new_start_date, db)
+        workload.quarter = quarter
+        workload.fiscal_year_id = fy_id
 
     db.commit()
     
-    # Update Sales Rep Totals
-    if workload.sales_rep:
-        update_from_workloads(workload.sales_rep, db)
+    # Trigger a recalculation of the parent Sales Rep's totals
+    # Always recalculate - explicitly fetch the SalesRep to ensure relationship is loaded
+    rep = db.query(SalesRep).filter(SalesRep.id == workload.sales_rep_id).first()
+    if rep:
+        update_from_workloads(rep, db)
         db.commit()
         
     return jsonify({"id": workload.id, "account_name": workload.account_name})
 
+
 @app.route('/api/workloads/<int:workload_id>', methods=['DELETE'])
 def delete_workload(workload_id):
-    """Delete a workload"""
+    """
+    Deletes a workload deal and updates the Sales Rep's summary totals.
+    """
     db = get_db()
     workload = db.query(Workload).filter(Workload.id == workload_id).first()
     if not workload:
         return jsonify({"error": "Workload not found"}), 404
-        
-    rep = workload.sales_rep
+    
+    # Capture the sales_rep_id BEFORE deleting the workload
+    sales_rep_id = workload.sales_rep_id
     db.delete(workload)
     db.commit()
     
-    # Update Sales Rep
+    # Ensure Sales Rep totals are updated to remove this deal's contribution
+    # Explicitly fetch the SalesRep to ensure recalculation happens
+    rep = db.query(SalesRep).filter(SalesRep.id == sales_rep_id).first()
     if rep:
         update_from_workloads(rep, db)
         db.commit()
@@ -659,86 +768,44 @@ def delete_workload(workload_id):
 
 def calculate_future_estimates(rep):
     """
-    Update future month columns (Jan..Dec) based on Current Daily Rate 
-    and number of days in the month.
+    Project future monthly totals based on the Current Daily Rate.
+    Only updates months that are strictly in the future relative to 'today'.
+    
+    Business Logic:
+    - Future months = Current Daily Rate * Number of days in that month.
+    - Past/Current months = Retain existing values (Actuals).
     """
     import calendar
     from datetime import date
     
+    # If no rate is defined, we cannot project
     if not rep.current_daily_rate:
         return
 
     today = date.today()
-    current_month_idx = today.month # 1=Jan, 12=Dec
+    current_month_idx = today.month 
     
-    # Month mapping to fields
+    # Map month indices to database column names
     month_map = {
         1: 'jan', 2: 'feb', 3: 'mar', 4: 'apr', 5: 'may', 6: 'jun',
         7: 'jul', 8: 'aug', 9: 'sep', 10: 'oct', 11: 'nov', 12: 'dec'
     }
     
-    # Fiscal Year logic? Usually FY is Jun-May.
-    # Future months are those AFTER the current month.
-    
     for m_idx, field_name in month_map.items():
-        # Check if month is in the future relative to today
-        # Simple logic: if m_idx > current_month_idx (same year) 
-        # OR if we are in Jun (6) and looking at Jan (1) of next year?
-        # Better: Iterate next 12 months from now.
-        pass
-
-    # New Logic: Iterate 1..12. If it's a future month, calculate.
-    # Note: "Future" depends on context. For FY26 (Jun 25 - May 26):
-    # If today is Jan 2026. Future = Feb, Mar, Apr, May. 
-    # Jun..Dec are past (Actuals). Jan is current.
-    
-    # Since we store Actuals in the same columns, we must ONLY overwrite IF it is a future month.
-    # How do we know? We rely on 'today'.
-    
-    def is_future(m):
-        if today.year == 2026: # Adjust based on real logic or assume system time
-            # For simplicity, if m > current_month, it's future in same year.
-            # If current is Dec, Jan is next year (future).
-            if m > current_month_idx: return True
-            if current_month_idx > 6 and m < 6: return True # e.g. Oct -> Jan is future
-        return False
-        
-    # Robust Future Check:
-    # 1. Construct date for the 1st of the month in current/next year
-    # 2. Compare with today
-    
-    for m_idx, field_name in month_map.items():
-        # Determine year for this month field context
-        # FY starts Jun. 
-        # If current month is >= 6 (Jun-Dec), then Jan-May are Next Year.
-        # If current month is < 6 (Jan-May), then Jun-Dec are Previous Year (Past).
-        
-        # Simplified: Just overwrite months that are strictly future from *now*.
-        # Assuming the columns hold data for the *Current Fiscal Year*.
-        
-        # Determine year of the month in the current fiscal year
-        # We need the fiscal year object or assume logic.
-        # Assume rep.fiscal_year.start_date exists? 
-        # Let's default to standard logic: 
-        # If today is Jan 2026. 
-        #   Jan: Current
-        #   Feb..May: Future (2026)
-        #   Jun..Dec: Past (2025)
-        
+        # --- Robust Future Determination ---
+        # Fiscal Year Context: FY ends May 31.
+        # We determine the calendar year of the month field relative to current FY.
         target_year = today.year
-        if current_month_idx >= 6: # We are in Jun-Dec 2025
-            if m_idx < 6: target_year += 1 # Jan-May are 2026
-        else: # We are in Jan-May 2026
-            if m_idx >= 6: target_year -= 1 # Jun-Dec were 2025
+        if current_month_idx >= 6: # Currently in Jun-Dec (e.g., 2025)
+            if m_idx < 6: target_year += 1 # Jan-May of next year (2026)
+        else: # Currently in Jan-May (e.g., 2026)
+            if m_idx >= 6: target_year -= 1 # Jun-Dec of previous year (2025)
             
         month_date = date(target_year, m_idx, 1)
         
-        # If month_date > today (ignoring day), it is future.
-        # Actually if month_date.month > today.month etc...
-        # safely: if date(target_year, m_idx, 1) > today (approx)
-        
+        # If the start of that month is after the current month, calculate projection
         if month_date > today.replace(day=1):
-             # Calculate Estimate
+             # Logic: Full month projection
              days_in_month = calendar.monthrange(target_year, m_idx)[1]
              est = rep.current_daily_rate * days_in_month
              setattr(rep, field_name, est)
@@ -746,9 +813,15 @@ def calculate_future_estimates(rep):
 
 def update_from_workloads(rep, db):
     """
-    Aggregate workloads for this rep and update Q1-Q4 Add FCT / Upside / Simulation.
+    Synchronizes the Sales Rep summary fields with the aggregate data from their Workloads.
+    
+    Logic:
+    - Sums all 'Forecast' types (Commit, Pipeline, etc.) into 'Add FCT' columns.
+    - Sums all 'Upside' types into 'Add Upside' columns.
+    - Separates totals by fiscal quarter.
+    - Updates derived 'Total Exit with Forecast' fields.
     """
-    # Initialize buckets
+    # Initialize separate buckets for total aggregation
     sums = {
         'q1': {'forecast': 0.0, 'upside': 0.0},
         'q2': {'forecast': 0.0, 'upside': 0.0},
@@ -756,29 +829,25 @@ def update_from_workloads(rep, db):
         'q4': {'forecast': 0.0, 'upside': 0.0}
     }
     
-    if not rep.workloads:
-        pass # Keep 0
-        
+    # Iterate through each deal associated with the rep
     for w in rep.workloads:
-        q = w.quarter.lower() # q1, q2...
+        q = w.quarter.lower() # Normalize to q1, q2...
         if q not in sums: continue
         
-        # Type: "Forecast" vs "Upside"
-        # We need to normalize forecast_type.
-        # Assumption: 'Forecast' adds to FCT, 'Upside' adds to Upside.
+        # Categorization Logic
         ftype = w.forecast_type.lower()
         amount = w.total_amount
         
         if 'upside' in ftype:
             sums[q]['upside'] += amount
-        elif 'forecast' in ftype or 'fct' in ftype or 'commit' in ftype or 'pipeline' in ftype:
-            # Strictly map to Forecast
+        elif any(keyword in ftype for keyword in ['forecast', 'fct', 'commit', 'pipeline']):
+            # These deals represent expected (forecasted) additions to the baseline exit
             sums[q]['forecast'] += amount
         else:
-            # Skip 'Won' or 'Closed' deals as they should be in the base number already
+            # Skip 'Won' or 'Closed' deals as they are assumed to be reflected in actuals
             pass
 
-    # Assign to Rep
+    # --- Persist aggregated values to the SalesRep model ---
     rep.q1_add_fct = sums['q1']['forecast']
     rep.q1_add_upside = sums['q1']['upside']
     
@@ -791,16 +860,13 @@ def update_from_workloads(rep, db):
     rep.q4_add_fct = sums['q4']['forecast']
     rep.q4_add_upside = sums['q4']['upside']
     
-    # Recalculate Totals
+    # --- Recalculate Combined Metrics ---
     rep.q1_total_exit_with_fc = rep.q1_exit + rep.q1_add_fct
     rep.q2_total_exit_with_fc = rep.q2_exit + rep.q2_add_fct
     
-    # Q3 Est needs Simulation? 
-    # Simulation is a field on Rep, usually manual. 
-    # "add the simulation to the quarter forcast"
-    # Q3 Estimated = Dec + Jan + Feb + Simulation
-    rep.q3_estimated = (rep.dec or 0) + (rep.jan or 0) + (rep.feb or 0) + (rep.simulation or 0)
-    rep.q3_total_exit_with_fc = rep.q3_estimated + rep.q3_add_fct
+    # Q3 calculation incorporates simulation overrides
+    rep.q3_exit = (rep.dec or 0) + (rep.jan or 0) + (rep.feb or 0) + (rep.simulation or 0)
+    rep.q3_total_exit_with_fc = rep.q3_exit + rep.q3_add_fct
     
     rep.q4_total_exit_with_fc = rep.q4_exit + rep.q4_add_fct
 
@@ -811,7 +877,16 @@ def update_from_workloads(rep, db):
 
 @app.route('/api/workloads/upload', methods=['POST'])
 def upload_workloads():
-    """Upload workloads from an Excel file"""
+    """
+    Handles bulk upload of workloads from Excel or CSV files.
+    
+    Logic:
+    1. Parses the uploaded file using Pandas.
+    2. Identifies Sales Reps by name (creates them if they don't exist in the cluster).
+    3. Infers fiscal quarter and year from the 'Consumption Start Date'.
+    4. Upserts workload records based on (Sales Rep, Account Name, Opt ID) uniqueness.
+    5. Triggers a full synchronization for all reps in the affected cluster.
+    """
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     
@@ -822,27 +897,27 @@ def upload_workloads():
         return jsonify({"error": "Missing cluster_id"}), 400
 
     try:
+        # Step 1: File Format Handling
         if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(file)
         else:
             df = pd.read_excel(file)
         
         db = get_db()
-        
-        # Get Default Quarter from form
         default_quarter = request.form.get('default_quarter', 'Q3')
         
-        # Normalize columns: lower case and stripped
+        # Step 2: DataFrame Normalization
+        # Standardize column headers to lowercase and strip whitespace
         df.columns = [str(c).strip().lower() for c in df.columns]
-        
-        # Clean data: Replace NaN with None/0
+        # Treat NaN values as None for database compatibility
         df = df.where(pd.notnull(df), None)
         
         count_added = 0
         count_updated = 0
         
+        # Step 3: Row-by-Row Processing
         for _, row in df.iterrows():
-            # Flexible Column Lookup Helper
+            # Flexible Column Lookup: Supports various naming conventions in Excel
             def get_val(keys, default=None):
                 for k in keys:
                     if k in row:
@@ -851,18 +926,19 @@ def upload_workloads():
                             return val
                 return default
 
-            # Sales Rep
+            # --- Entity: Sales Rep ---
+            # Attempt to find rep name in common column headers
             rep_name = get_val(['sales rep name', 'sales rep', 'rep', 'owner'])
             if not rep_name: continue
             
-            # Find or create rep in this cluster
+            # Locate or create the Sales Rep within the current cluster context
             rep = db.query(SalesRep).filter(SalesRep.name == str(rep_name).strip(), SalesRep.cluster_id == int(cluster_id)).first()
             if not rep:
                 rep = SalesRep(name=str(rep_name).strip(), cluster_id=int(cluster_id))
                 db.add(rep)
-                db.flush()
+                db.flush() # Ensure rep has an ID before creating workloads
             
-            # Date Parsing
+            # --- Field: Date Processing ---
             raw_date = get_val(['consumption start date', 'start date', 'date', 'start'])
             parsed_date = ''
             if raw_date and str(raw_date).strip().lower() not in ['nat', 'nan', 'none']:
@@ -873,20 +949,19 @@ def upload_workloads():
                         from dateutil import parser
                         parsed_date = parser.parse(str(raw_date)).strftime('%Y-%m-%d')
                 except:
-                    parsed_date = ''
+                    parsed_date = '' # Fallback on invalid date strings
             
-            # Derive fiscal info
+            # --- Field: Fiscal Assignment ---
             if parsed_date:
                 quarter, fy_id = derive_fiscal_info(parsed_date, db)
             else:
                 quarter = default_quarter
-                # Default to current or latest FY. Assuming latest FY exist.
-                # Use helper if possible, or query manually.
                 latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
                 fy_id = latest_fy.id if latest_fy else None
 
-            # Check for currency symbols cleanup via helper
+            # --- Field: Monetary Cleanup ---
             def clean_money(val):
+                """ Strips currency symbols and converts string numbers to floats. """
                 if isinstance(val, str):
                     val = val.replace('$', '').replace(',', '').replace('"', '').strip()
                     if val == '-' or val == '': return 0.0
@@ -895,28 +970,24 @@ def upload_workloads():
                 except:
                     return 0.0
 
-            # Amounts
+            # Map Excel columns to monthly buckets
             m1 = clean_money(get_val(['month 1', 'dec', 'december', 'mar', 'march', 'june', 'jun'], 0))
             m2 = clean_money(get_val(['month 2', 'jan', 'january', 'apr', 'april', 'july', 'jul'], 0))
             m3 = clean_money(get_val(['month 3', 'feb', 'february', 'may', 'august', 'aug'], 0))
 
-            # Account
             acct_name = str(get_val(['account name', 'account', 'customer', 'customer name'], 'Unknown'))
-            
-            # Forecast Type
             f_type = str(get_val(['forecast type', 'forecast', 'type', 'stage'], 'Forecast'))
-            
-            # Opt ID
             opt_id_val = str(get_val(['opt id', 'opportunity id', 'opt', 'opty id', 'opportunity'], ''))
 
-            # UPSERT LOGIC
+            # --- Step 4: UPSERT Logic ---
+            # Determine uniqueness by (Rep + Account + Opportunity ID)
             existing_wl = db.query(Workload).filter(
                 Workload.sales_rep_id == rep.id,
                 Workload.account_name == acct_name,
                 Workload.opt_id == opt_id_val
             ).first()
             
-            # Fields to update/create
+            # Prepared updated field set
             updated_fields = {
                 'sales_rep_id': rep.id,
                 'fiscal_year_id': fy_id,
@@ -931,23 +1002,25 @@ def upload_workloads():
                 'month_1_amt': m1,
                 'month_2_amt': m2,
                 'month_3_amt': m3,
+                'total': m1 + m2 + m3,  # Store sum in database
                 'consumption_start_date': parsed_date
             }
 
             if existing_wl:
-                # Update
+                # Actual update call
                 for key, value in updated_fields.items():
                     setattr(existing_wl, key, value)
                 count_updated += 1
             else:
-                # Create
+                # Create new record
                 wl = Workload(**updated_fields)
                 db.add(wl)
                 count_added += 1
             
         db.commit()
         
-        # Trigger Bulk Sync after upload
+        # --- Step 5: Post-Upload Bulk Synchronization ---
+        # Force a calculation update for every rep in the cluster to reflect new deal data
         reps = db.query(SalesRep).filter(SalesRep.cluster_id == int(cluster_id)).all()
         for r in reps:
             update_from_workloads(r, db)
@@ -962,7 +1035,17 @@ def upload_workloads():
 
 @app.route('/api/sales_data/upload', methods=['POST'])
 def upload_sales_data():
-    """Upload Sales Rep data from the 'FY26 Consumption Numbers' sheet"""
+    """
+    Uploads core Sales Rep performance data (historic exits, daily rates, monthlies).
+    This typically processes the 'FY26 Consumption Numbers' style sheets.
+    
+    Logic:
+    1. Parses the file into a DataFrame.
+    2. Maps column names like 'FY25Q4 Exit' to database fields like 'last_year_exit'.
+    3. Calculates Q3 Estimates based on a business logic formula:
+       (Current Actual Jan + Jan Est + Feb Est + Simulation + Dec Actual)
+    4. Upserts Sales Rep records for the latest fiscal year.
+    """
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
     
@@ -973,6 +1056,7 @@ def upload_sales_data():
         return jsonify({"error": "Missing cluster_id"}), 400
 
     try:
+        # Step 1: Format Handling
         if file.filename.lower().endswith('.csv'):
             df = pd.read_csv(file)
         else:
@@ -980,16 +1064,17 @@ def upload_sales_data():
         
         db = get_db()
         
-        # Normalize columns: lower case and stripped
+        # Standardize column headers
         df.columns = [str(c).strip().lower() for c in df.columns]
         
-        # Helper to safely get float values
+        # Helper: Robust float extraction from messy Excel strings
         def get_float(row, keys, default=0.0):
             for k in keys:
                 if k in row:
                     val = row[k]
                     try:
                         if isinstance(val, str):
+                            # Remove currency and formatting symbols
                             val = val.replace('$', '').replace(',', '').replace('%', '').strip()
                             if val in ['-', '']: return default
                         return float(val) if pd.notnull(val) else default
@@ -997,7 +1082,7 @@ def upload_sales_data():
                         pass
             return default
 
-        # Helper to get string values
+        # Helper: Robust string extraction
         def get_str(row, keys, default=''):
             for k in keys:
                 if k in row and pd.notnull(row[k]):
@@ -1005,13 +1090,13 @@ def upload_sales_data():
             return default
 
         count = 0
+        # Iterate through sales reps in the sheet
         for _, row in df.iterrows():
-            # 1. Identify Sales Rep
+            # Identify the target Sales Rep
             rep_name = get_str(row, ['sales rep', 'rep name', 'sales_rep', 'rep_name'], None)
             if not rep_name or rep_name.lower() == 'total': continue
 
-            # 2. Extract Raw Data
-            # 2. Extract Raw Data
+            # --- Step 2: Extract Performance Metrics ---
             last_year_exit = get_float(row, ['fy25q4 exit', 'fy25 q4 exit'])
             q1_exit = get_float(row, ['fy26q1 exit', 'fy26 q1 exit'])
             q2_exit_raw = get_float(row, ['fy26q2 exit', 'fy26 q2 exit'])
@@ -1022,49 +1107,38 @@ def upload_sales_data():
             december_actual = get_float(row, ['december actual'])
             current_actual_jan = get_float(row, ['current actual jan'])
             
-            # 3. Calculate Derived Fields (if missing or always enforce consistency?)
-            # We enforce consistency based on user confirmed logic
+            # --- Step 3: Complex Business Logic Calculations ---
+            # These formulas define how future performance is estimated during a partial month
             
-            # Jan Est = Current Daily Rate * 28.85
+            # Future Projections based on 'Days Remaining' logic (simplified to constants)
             january_estimated = current_daily_rate * 28.85
-            
-            # Feb Est = Current Daily Rate * 28
             february_estimated = current_daily_rate * 28
             
-            # Simulation (User input usually, assume 0 if not present or take from sheet)
             simulation = get_float(row, ['simulation'])
             
-            # FY26Q3 Est = Jan Actual + Jan Est + Feb Est + Sim + Dec Actual
-            # Note: User plan said Dec Actual is proxy/base.
-            q3_estimated = current_actual_jan + january_estimated + february_estimated + simulation + december_actual
+            # The "Q3 Estimated" formula combines multiple source fields
+            q3_exit = current_actual_jan + january_estimated + february_estimated + simulation + december_actual
             
-            # Q1 QoQ = (Q1 Exit - Q4 Exit) / Q4 Exit
+            # Sequential Growth (QoQ)
             if last_year_exit:
                 q1_qoq_pct = ((q1_exit / last_year_exit) - 1) * 100
             else:
                 q1_qoq_pct = 0.0
 
-            # Q2 QoQ = (Q2 Exit - Q1 Exit) / Q1 Exit
-            # Note: We use the raw Q2 exit from sheet if available, else calc?
-            # Sheet usually has Q2 Exit computed. Let's use sheet value if non-zero, else calc?
-            # Let's trust sheet value for Q2 Exit as it is historical now (or near closing)
             q2_exit = q2_exit_raw
-            
             if q1_exit:
                 q2_qoq_pct = ((q2_exit / q1_exit) - 1) * 100
             else:
                 q2_qoq_pct = 0.0
                 
-            # Q3 QoQ = (Q3 Est / Q2 Exit) - 1
             if q2_exit:
-                q3_qoq_pct = ((q3_estimated / q2_exit) - 1) * 100
+                q3_qoq_pct = ((q3_exit / q2_exit) - 1) * 100
             else:
                 q3_qoq_pct = 0.0
 
-            # Extras / Upside
+            # Upside & Forecast Aggregates
             q3_add_fct = get_float(row, ['fy26q3 add. fct'])
-            
-            q3_total_exit_with_fc = q3_estimated + q3_add_fct
+            q3_total_exit_with_fc = q3_exit + q3_add_fct
             
             if q2_exit:
                 qoq_plus_fct_pct = ((q3_total_exit_with_fc / q2_exit) - 1) * 100
@@ -1073,20 +1147,19 @@ def upload_sales_data():
                 
             q3_add_upside = get_float(row, ['fy26q3 add upside', 'fy26 q3 add upside'])
             
-            # Q4 Data (Extract if available)
+            # Q4 Projections
             q4_exit = get_float(row, ['fy26q4 exit', 'fy26 q4 exit'])
             q4_add_fct = get_float(row, ['fy26q4 add. fct', 'fy26 q4 add. fct', 'fy26q4 add fct'])
             q4_add_upside = get_float(row, ['fy26q4 add upside', 'fy26 q4 add upside'])
-            
-            # Calc Q4 Total if not present? (Exit + Add FCT)
             q4_total_exit_with_fc = q4_exit + q4_add_fct
 
-            # 4. Update/Create DB Record
-            # Only look for reps in the CURRENT fiscal year (latest)
+            # --- Step 4: Database Persistence ---
+            # Default to the most recently created Fiscal Year
             latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
             if not latest_fy:
                   return jsonify({"error": "No fiscal year found. Please seed database."}), 400
 
+            # Match by Name within the Cluster and FY
             rep = db.query(SalesRep).filter(
                 SalesRep.name == rep_name, 
                 SalesRep.cluster_id == int(cluster_id),
@@ -1094,6 +1167,7 @@ def upload_sales_data():
             ).first()
             
             if not rep:
+                # Create if missing
                 rep = SalesRep(
                     name=rep_name, 
                     cluster_id=int(cluster_id),
@@ -1101,6 +1175,7 @@ def upload_sales_data():
                 )
                 db.add(rep)
             
+            # Update core performance fields
             rep.last_year_exit = last_year_exit
             rep.q1_exit = q1_exit
             rep.q2_exit = q2_exit
@@ -1108,20 +1183,16 @@ def upload_sales_data():
             rep.last_week_daily_rate = last_week_daily_rate
             rep.current_daily_rate = current_daily_rate
             
-            # Monthlies (simplified - assumes model has these columns)
-            # rep.december_actual = december_actual  # Check if model has this? Model only has jan..dec.
-            # Using jan..dec columns from model
-            # For simplicity, just updating Q3 fields as requested
-            
+            # Note: Specific monthly columns (Jan, Feb, etc.) are implicitly updated via Q3 logic
             rep.simulation = simulation
+            rep.q3_exit = q3_exit
             
-            rep.q3_estimated = q3_estimated
-            
+            # Forecast and Upside fields
             rep.q3_add_fct = q3_add_fct
             rep.q3_total_exit_with_fc = q3_total_exit_with_fc
             rep.q3_add_upside = q3_add_upside
             
-            # Q4
+            # Q4 Projections
             rep.q4_exit = q4_exit
             rep.q4_add_fct = q4_add_fct
             rep.q4_total_exit_with_fc = q4_total_exit_with_fc

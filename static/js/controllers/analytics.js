@@ -1,13 +1,24 @@
+/**
+ * Analytics Controller.
+ * Manages the "Quarterly History" view, providing a comprehensive overview 
+ * of exit numbers and growth percentages across all quarters.
+ */
 import { state } from '../state.js';
 import { fetchDashboard } from '../api.js';
 import { formatCurrency, formatPercent, getPercentColorClass } from '../utils.js';
 
+/**
+ * Loads analytics data for the current cluster.
+ * Leverages the dashboard API for aggregated history metrics.
+ */
 export async function loadAnalyticsData() {
+    // Only proceed if the history table is present in the DOM
     if (!document.getElementById('quarterly-history-table')) return;
 
     if (!state.currentClusterId) return;
 
     try {
+        // Reuse fetchDashboard as it provides the full SalesRep list with history
         const dashboardData = await fetchDashboard(state.currentClusterId);
         renderQuarterlyHistory(dashboardData);
     } catch (e) {
@@ -15,6 +26,10 @@ export async function loadAnalyticsData() {
     }
 }
 
+/**
+ * Renders the full history table with rep-by-rep metrics and cluster totals.
+ * @param {Object} data - Processed dashboard data from the backend.
+ */
 function renderQuarterlyHistory(data) {
     const tbody = document.getElementById('quarterly-history-tbody');
     if (!tbody) return;
@@ -24,22 +39,31 @@ function renderQuarterlyHistory(data) {
         return;
     }
 
+    // Initialize cluster-wide totals
     const totals = {
-        last_year_exit: 0, q1_exit: 0, q2_exit: 0, q3_estimated: 0, q4_exit: 0
+        last_year_exit: 0,
+        q1_exit: 0,
+        q2_exit: 0,
+        q3_exit: 0,
+        q4_exit: 0
     };
+
+    // Calculate aggregated QoQ averages
     const avgQ1QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q1_qoq_pct || 0), 0) / data.sales_reps.length;
     const avgQ2QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q2_qoq_pct || 0), 0) / data.sales_reps.length;
     const avgQ3QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q3_qoq_pct || 0), 0) / data.sales_reps.length;
     const avgQ4QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q4_qoq_pct || 0), 0) / data.sales_reps.length;
 
+    // Sum up individual columns
     data.sales_reps.forEach(rep => {
         totals.last_year_exit += rep.last_year_exit || 0;
         totals.q1_exit += rep.q1_exit || 0;
         totals.q2_exit += rep.q2_exit || 0;
-        totals.q3_estimated += rep.q3_estimated || 0;
+        totals.q3_exit += rep.q3_exit || 0;
         totals.q4_exit += rep.q4_exit || 0;
     });
 
+    // Generate table rows
     tbody.innerHTML = data.sales_reps.map(rep => `
         <tr>
             <td class="fixed-col">${rep.name}</td>
@@ -48,7 +72,7 @@ function renderQuarterlyHistory(data) {
             <td class="${getPercentColorClass(rep.q1_qoq_pct)}">${formatPercent(rep.q1_qoq_pct)}</td>
             <td>${formatCurrency(rep.q2_exit)}</td>
             <td class="${getPercentColorClass(rep.q2_qoq_pct)}">${formatPercent(rep.q2_qoq_pct)}</td>
-            <td>${formatCurrency(rep.q3_estimated)}</td>
+            <td>${formatCurrency(rep.q3_exit)}</td>
             <td class="${getPercentColorClass(rep.q3_qoq_pct)}">${formatPercent(rep.q3_qoq_pct)}</td>
             <td>${formatCurrency(rep.q4_exit)}</td>
             <td class="${getPercentColorClass(rep.q4_qoq_pct)}">${formatPercent(rep.q4_qoq_pct)}</td>
@@ -61,7 +85,7 @@ function renderQuarterlyHistory(data) {
             <td class="${getPercentColorClass(avgQ1QoQ)}"><strong>${formatPercent(avgQ1QoQ)}</strong></td>
             <td><strong>${formatCurrency(totals.q2_exit)}</strong></td>
             <td class="${getPercentColorClass(avgQ2QoQ)}"><strong>${formatPercent(avgQ2QoQ)}</strong></td>
-            <td><strong>${formatCurrency(totals.q3_estimated)}</strong></td>
+            <td><strong>${formatCurrency(totals.q3_exit)}</strong></td>
             <td class="${getPercentColorClass(avgQ3QoQ)}"><strong>${formatPercent(avgQ3QoQ)}</strong></td>
             <td><strong>${formatCurrency(totals.q4_exit)}</strong></td>
             <td class="${getPercentColorClass(avgQ4QoQ)}"><strong>${formatPercent(avgQ4QoQ)}</strong></td>

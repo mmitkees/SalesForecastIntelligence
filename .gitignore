@@ -19,11 +19,11 @@ env/
 # OS
 .DS_Store
 
-# Environment variables
-.env
+# Logs
 app.err
 app.log
-.DS_Store
-venv/
-__pycache__/
-*.pyc
+flask.log
+
+# Note: .env is NOT ignored - it's needed for deployment configuration
+# Sensitive credentials should use .env.local which IS ignored
+.env.local

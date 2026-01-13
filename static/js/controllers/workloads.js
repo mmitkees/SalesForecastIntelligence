@@ -1,10 +1,18 @@
+/**
+ * Workloads Controller.
+ * Manages the "Workloads" view, including deal CRUD, bulk Excel uploads, 
+ * inline editing, and Excel exports.
+ */
 import { fetchWorkloads, fetchSalesReps, updateWorkload, deleteWorkload, createWorkload } from '../api.js';
 import { formatCurrency, deriveQuarter, showAlert, showConfirm } from '../utils.js';
 import { state, setState } from '../state.js';
 
-// Comments state
+/** @type {number|null} Track the workload ID for the currently open comments modal */
 let currentCommentsWorkloadId = null;
 
+/**
+ * Initializes workload data and filters.
+ */
 export async function loadWorkloadsData() {
     if (!document.getElementById('workloads-quarters-container')) return;
 
@@ -14,9 +22,12 @@ export async function loadWorkloadsData() {
         const reps = await fetchSalesReps(state.currentClusterId);
         setState('salesReps', reps);
         populateSalesRepDropdown(reps);
-
         populateAccountManagerFilter(reps);
-        setupFilterListeners(); // Bind listeners to filters
+
+        // Restore saved filter values from state
+        restoreFiltersFromState();
+
+        setupFilterListeners();
 
         const data = await fetchWorkloads(state.currentClusterId);
         setState('workloads', data);
@@ -27,21 +38,25 @@ export async function loadWorkloadsData() {
     }
 }
 
+/**
+ * Orchestrates the rendering of all quarterly workload tables.
+ * Handles rolling order, initial expansion, and data distribution.
+ */
 export function reRenderWorkloadTables() {
     const container = document.getElementById('workloads-quarters-container');
-    if (!container) return; // Should exist
+    if (!container) return;
 
     const workloads = state.workloads;
 
-    // Ensure every workload has a quarter
+    // Ensure metadata consistency
     workloads.forEach(w => {
         if (!w.quarter && w.consumption_start_date) {
             w.quarter = deriveQuarter(w.consumption_start_date);
         }
-        if (!w.quarter) w.quarter = 'Q3'; // Fallback
+        if (!w.quarter) w.quarter = 'Q3';
     });
 
-    // Determine Rolling Order (Current -> Next -> Prev)
+    // Rolling Order Logic: Start with current quarter
     const month = new Date().getMonth() + 1;
     let currentQuarter = 'Q3';
     if (month >= 6 && month <= 8) currentQuarter = 'Q1';
@@ -53,7 +68,6 @@ export function reRenderWorkloadTables() {
     const idx = allQuarters.indexOf(currentQuarter);
     const displayOrder = [...allQuarters.slice(idx), ...allQuarters.slice(0, idx)];
 
-    // Generate Titles and Months
     const quarterConfigs = {
         'Q1': { title: 'Q1 (Jun - Jul - Aug)', months: ['Jun', 'Jul', 'Aug'] },
         'Q2': { title: 'Q2 (Sep - Oct - Nov)', months: ['Sep', 'Oct', 'Nov'] },
@@ -61,27 +75,30 @@ export function reRenderWorkloadTables() {
         'Q4': { title: 'Q4 (Mar - Apr - May)', months: ['Mar', 'Apr', 'May'] }
     };
 
-    // 1. Generate Structure
+    // 1. Build skeleton
     container.innerHTML = displayOrder.map(q => {
         const config = quarterConfigs[q];
         return renderQuarterSection(q, config.title, config.months);
     }).join('');
 
-    // 2. Populate Data (using existing renderWorkloadTable)
+    // 2. Populate rows
     displayOrder.forEach(q => {
         const tbodyId = `workloads-tbody-${q.toLowerCase()}`;
         const data = workloads.filter(w => w.quarter === q);
         renderWorkloadTable(data, tbodyId, q);
     });
 
-    // 3. Expand Current Quarter (collapse others)
+    // 3. Initial state: Expand saved quarter or current quarter
+    const savedExpandedQuarter = state.workloadsExpandedQuarter;
+    const quarterToExpand = savedExpandedQuarter || currentQuarter;
+
     displayOrder.forEach(q => {
         const qLower = q.toLowerCase();
         const content = document.getElementById(`${qLower}-content`);
         const icon = document.getElementById(`${qLower}-icon`);
         const header = document.querySelector(`#${qLower}-section`);
 
-        if (q === currentQuarter) {
+        if (q === quarterToExpand) {
             if (content) content.style.display = 'block';
             if (icon) icon.textContent = '▼';
             if (header) header.classList.remove('collapsed');
@@ -91,11 +108,11 @@ export function reRenderWorkloadTables() {
             if (header) header.classList.add('collapsed');
         }
     });
-
-    // 4. Dynamic Export Buttons
-    // Export function is generic and accepts the quarter ID from the button click.
 }
 
+/**
+ * Generates the HTML shell for a quarterly section.
+ */
 function renderQuarterSection(quarter, title, months) {
     const qLower = quarter.toLowerCase();
     return `
@@ -145,14 +162,17 @@ function renderQuarterSection(quarter, title, months) {
     </div>`;
 }
 
+/**
+ * Renders the rows for a specific quarterly workload table.
+ * Includes filtering and multi-field sorting.
+ */
 function renderWorkloadTable(data, tbodyId, quarter) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return 0;
 
-    // Use unified filter helper
     const filtered = getFilteredWorkloads(data);
 
-    // Apply Sorting
+    // Sorting Logic
     filtered.sort((a, b) => {
         let valA, valB;
         const currentSort = state.currentSort;
@@ -174,7 +194,6 @@ function renderWorkloadTable(data, tbodyId, quarter) {
         return 0;
     });
 
-    // Update count and breakdowns in header via helper
     updateQuarterStats(quarter);
 
     if (filtered.length === 0) {
@@ -250,6 +269,9 @@ function renderWorkloadTable(data, tbodyId, quarter) {
     return filtered.length;
 }
 
+/**
+ * Populates the 'Add Workload' rep dropdown.
+ */
 function populateSalesRepDropdown(reps) {
     const select = document.getElementById('wl-sales-rep');
     if (select) {
@@ -258,6 +280,9 @@ function populateSalesRepDropdown(reps) {
     }
 }
 
+/**
+ * Populates the global account manager filter.
+ */
 function populateAccountManagerFilter(reps) {
     const filter = document.getElementById('filter-account-manager');
     if (!filter) return;
@@ -268,6 +293,9 @@ function populateAccountManagerFilter(reps) {
     filter.value = currentVal;
 }
 
+/**
+ * Handles bulk Excel upload of workloads.
+ */
 export async function uploadExcel(file) {
     const formData = new FormData();
     formData.append('file', file);
@@ -305,7 +333,9 @@ export async function uploadExcel(file) {
     }
 }
 
-// Modal & Form Handlers
+/**
+ * Opens the 'Add Workload' modal and resets its state.
+ */
 export function openModal(title = 'Add Workload') {
     const modal = document.getElementById('workload-modal');
     if (!modal) return;
@@ -319,6 +349,9 @@ export function openModal(title = 'Add Workload') {
     document.getElementById('lbl-month-3').textContent = 'Month 3 ($)';
 }
 
+/**
+ * Closes the 'Add Workload' modal.
+ */
 export function closeModal() {
     const modal = document.getElementById('workload-modal');
     if (!modal) return;
@@ -333,6 +366,9 @@ export function closeModal() {
     document.getElementById('lbl-month-3').textContent = 'Month 3 ($)';
 }
 
+/**
+ * Handles 'Add Workload' form submission.
+ */
 export async function handleFormSubmit(e) {
     e.preventDefault();
 
@@ -359,13 +395,12 @@ export async function handleFormSubmit(e) {
     }
 
     closeModal();
-    // Refresh only if current view is workloads. If dashboard, main loop handles it.
-    // Actually we should refresh the current view data.
-    // If in workloads view:
     await loadWorkloadsData();
 }
 
-// Helper to get filtered data for stats
+/**
+ * Filters the workload list based on active UI filters.
+ */
 function getFilteredWorkloads(data) {
     let filtered = data;
     const amFilter = document.getElementById('filter-account-manager');
@@ -388,6 +423,9 @@ function getFilteredWorkloads(data) {
     return filtered;
 }
 
+/**
+ * Updates the summary statistics (WON, FCT, UPS) in the quarter headers.
+ */
 function updateQuarterStats(quarter) {
     const qLower = quarter.toLowerCase();
     const data = state.workloads.filter(w => w.quarter === quarter);
@@ -417,25 +455,24 @@ function updateQuarterStats(quarter) {
     }
 }
 
-// Exposed Global Functions
+/**
+ * Handles real-time inline editing for workload table cells.
+ * Triggers API updates and local state synchronization.
+ */
 window.handleInlineEdit = async function (id, field, value) {
-    // Optimistic UI update
     const workload = state.workloads.find(w => w.id === id);
     if (!workload) return;
 
-    // Type coercion
+    // Numerical conditioning
     if (['month_1_amt', 'month_2_amt', 'month_3_amt'].includes(field)) {
         value = parseFloat(value) || 0;
     }
 
-    // Update local state
     workload[field] = value;
 
-    // Recalculate total if amount changed
     let shouldUpdateStats = false;
     if (field.includes('amt')) {
         workload.total_amount = workload.month_1_amt + workload.month_2_amt + workload.month_3_amt;
-        // Update DOM total immediately
         const row = document.querySelector(`tr[data-id="${id}"]`);
         if (row) {
             row.querySelector('.total-col strong').textContent = formatCurrency(workload.total_amount);
@@ -443,7 +480,6 @@ window.handleInlineEdit = async function (id, field, value) {
         shouldUpdateStats = true;
     }
 
-    // Update stats if forecast type changed
     if (field === 'forecast_type') {
         const select = document.querySelector(`tr[data-id="${id}"] .forecast-select`);
         if (select) {
@@ -452,13 +488,13 @@ window.handleInlineEdit = async function (id, field, value) {
         shouldUpdateStats = true;
     }
 
-    // Recalculate quarter if date changed
+    // Quarter recalibration
     if (field === 'consumption_start_date') {
         const newQuarter = deriveQuarter(value);
         if (workload.quarter !== newQuarter) {
             workload.quarter = newQuarter;
             reRenderWorkloadTables();
-            return; // reRender handles stats update
+            // Still perform API call
         }
     }
 
@@ -466,7 +502,6 @@ window.handleInlineEdit = async function (id, field, value) {
         updateQuarterStats(workload.quarter);
     }
 
-    // Send API request
     try {
         await updateWorkload(id, { [field]: value });
     } catch (e) {
@@ -474,6 +509,9 @@ window.handleInlineEdit = async function (id, field, value) {
     }
 };
 
+/**
+ * Deletes a workload.
+ */
 window.removeWorkload = async function (id) {
     const ok = await showConfirm('Delete Workload', 'Are you sure you want to delete this workload?');
     if (ok) {
@@ -482,6 +520,9 @@ window.removeWorkload = async function (id) {
     }
 };
 
+/**
+ * Opens the comments modal.
+ */
 window.openCommentsModal = function (workloadId, accountName) {
     currentCommentsWorkloadId = workloadId;
     const workload = state.workloads.find(w => w.id === workloadId);
@@ -498,15 +539,16 @@ window.openCommentsModal = function (workloadId, accountName) {
     }
 };
 
+/**
+ * Toggles a quarterly workload section (accordion logic).
+ */
 window.toggleQuarterSection = function (quarter) {
     const qLower = quarter.toLowerCase();
     const allQuarters = ['q1', 'q2', 'q3', 'q4'];
 
-    // Check current state of target
     const targetContent = document.getElementById(`${qLower}-content`);
     const isCurrentlyOpen = targetContent && targetContent.style.display === 'block';
 
-    // Close ALL sections
     allQuarters.forEach(q => {
         const content = document.getElementById(`${q}-content`);
         const icon = document.getElementById(`${q}-icon`);
@@ -517,20 +559,26 @@ window.toggleQuarterSection = function (quarter) {
         if (section) section.classList.add('collapsed');
     });
 
-    // If it was closed, open it (Accordion behavior)
     if (!isCurrentlyOpen && targetContent) {
         targetContent.style.display = 'block';
         const icon = document.getElementById(`${qLower}-icon`);
         const section = document.getElementById(`${qLower}-section`);
         if (icon) icon.textContent = '▼';
         if (section) section.classList.remove('collapsed');
+        // Save expanded quarter to state
+        setState('workloadsExpandedQuarter', quarter.toUpperCase());
+    } else {
+        // All collapsed - clear the saved state
+        setState('workloadsExpandedQuarter', null);
     }
 };
 
+/**
+ * Exports the visible data for a specific quarter to Excel.
+ */
 window.exportToExcel = function (quarter, event) {
     if (event) event.stopPropagation();
 
-    // Get data for this quarter
     const workloads = state.workloads;
     const quarterData = workloads.filter(w => w.quarter === quarter);
 
@@ -539,7 +587,6 @@ window.exportToExcel = function (quarter, event) {
         return;
     }
 
-    // Format data for Excel
     const data = quarterData.map(w => ({
         'Forecast': w.forecast_type,
         'Account': w.account_name,
@@ -556,17 +603,15 @@ window.exportToExcel = function (quarter, event) {
         'Comments': w.comments
     }));
 
-    // Create workbook and worksheet (using global XLSX from CDN)
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
-
-    // Add worksheet to workbook
     XLSX.utils.book_append_sheet(wb, ws, `${quarter} Workloads`);
-
-    // Save to file
     XLSX.writeFile(wb, `Sales_Intel_Workloads_${quarter}.xlsx`);
 };
 
+/**
+ * Handles table sorting logic.
+ */
 export async function handleSort(field) {
     if (state.currentSort.field === field) {
         state.currentSort.order = state.currentSort.order === 'asc' ? 'desc' : 'asc';
@@ -577,11 +622,13 @@ export async function handleSort(field) {
     reRenderWorkloadTables();
 }
 
+/**
+ * Resets sorting and triggers a re-render when a new AM filter is selected.
+ */
 export function handleAccountManagerFilterChange() {
     state.currentSort.field = 'forecast';
     state.currentSort.order = 'asc';
 
-    // If 'All Account Managers' selected, clear other filters so "all appears"
     const amFilter = document.getElementById('filter-account-manager');
     if (amFilter && amFilter.value === '') {
         ['filter-forecast-type', 'filter-customer-type', 'filter-workload-type'].forEach(id => {
@@ -593,9 +640,8 @@ export function handleAccountManagerFilterChange() {
     reRenderWorkloadTables();
 }
 
-// Setup internal event listeners for comments modal close/save
+// Global UI Navigation delegation
 document.addEventListener('click', (e) => {
-    // Check if we are in workloads view implicitly by existence of modal or similar
     if (e.target.id === 'close-comments-modal' || e.target.id === 'cancel-comments-modal') {
         const modal = document.getElementById('comments-modal');
         if (modal) modal.classList.remove('active');
@@ -611,6 +657,9 @@ document.addEventListener('click', (e) => {
     }
 });
 
+/**
+ * Saves comments from the modal.
+ */
 async function saveComments() {
     if (!currentCommentsWorkloadId) return;
     const textarea = document.getElementById('comments-modal-text');
@@ -622,17 +671,55 @@ async function saveComments() {
     currentCommentsWorkloadId = null;
 }
 
+/**
+ * Binds DOM event listeners to the side/top filter elements.
+ */
 function setupFilterListeners() {
     ['filter-forecast-type', 'filter-customer-type', 'filter-workload-type'].forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.onchange = () => reRenderWorkloadTables();
+            el.onchange = () => {
+                saveFiltersToState();
+                reRenderWorkloadTables();
+            };
         }
     });
 
-    // Also Account Manager if not already handled via HTML attribute
     const amFilter = document.getElementById('filter-account-manager');
     if (amFilter) {
-        amFilter.onchange = handleAccountManagerFilterChange;
+        amFilter.onchange = () => {
+            saveFiltersToState();
+            handleAccountManagerFilterChange();
+        };
     }
+}
+
+/**
+ * Saves current filter values to global state for persistence.
+ */
+function saveFiltersToState() {
+    state.workloadsFilter = {
+        accountManager: document.getElementById('filter-account-manager')?.value || '',
+        forecastType: document.getElementById('filter-forecast-type')?.value || '',
+        customerType: document.getElementById('filter-customer-type')?.value || '',
+        workloadType: document.getElementById('filter-workload-type')?.value || ''
+    };
+}
+
+/**
+ * Restores filter values from global state after page navigation.
+ */
+function restoreFiltersFromState() {
+    const filters = state.workloadsFilter;
+    if (!filters) return;
+
+    const amFilter = document.getElementById('filter-account-manager');
+    const forecastFilter = document.getElementById('filter-forecast-type');
+    const customerFilter = document.getElementById('filter-customer-type');
+    const workloadFilter = document.getElementById('filter-workload-type');
+
+    if (amFilter && filters.accountManager) amFilter.value = filters.accountManager;
+    if (forecastFilter && filters.forecastType) forecastFilter.value = filters.forecastType;
+    if (customerFilter && filters.customerType) customerFilter.value = filters.customerType;
+    if (workloadFilter && filters.workloadType) workloadFilter.value = filters.workloadType;
 }

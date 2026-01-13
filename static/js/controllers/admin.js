@@ -1,9 +1,19 @@
+/**
+ * Admin Controller.
+ * Manages the cluster management interface, sales rep CRUD operations, 
+ * and bulk workload uploads from the admin panel.
+ */
 import { fetchClusters, fetchAllSalesReps, createSalesRep, deleteSalesRep, deleteCluster, fetchFiscalYears } from '../api.js';
 import { showConfirm, showAlert } from '../utils.js';
 import { loadClusters } from '../main.js';
 
+/** @type {number|null} Store the most recent fiscal year for new rep creation */
 let latestFyId = null;
 
+/**
+ * Loads and renders the admin dashboard.
+ * Fetches clusters and their associated sales reps.
+ */
 export async function loadAdminData() {
     const container = document.getElementById('admin-clusters-container');
     if (!container) return;
@@ -11,31 +21,27 @@ export async function loadAdminData() {
     try {
         container.innerHTML = '<p class="loading">Loading clusters...</p>';
 
+        // Parallel fetch for UI efficiency
         const [clusters, allReps, fiscalYears] = await Promise.all([
             fetchClusters(),
             fetchAllSalesReps(),
             fetchFiscalYears()
         ]);
 
-        // Set latest FY
         if (fiscalYears && fiscalYears.length > 0) {
             latestFyId = fiscalYears[0].id;
         }
-
-
 
         if (!clusters || clusters.length === 0) {
             container.innerHTML = '<div><p class="no-reps">No clusters found. Add a cluster above to get started.</p></div>';
             return;
         }
 
+        // Render cluster accordion sections
         container.innerHTML = clusters.map((cluster, index) => {
             const clusterReps = Array.isArray(allReps) ? allReps.filter(r => r.cluster_id === cluster.id) : [];
-            const isExpanded = false; // Default all collapsed? Or first expanded? Let's default all collapsed to keep it clean, or index === 0.
-            // User requested "maximize a table... other gets collapsed". 
-            // Better UX: Open first one? No, let's keep all collapsed or restore state. 
-            // For now, let's defaults to all closed except user interaction.
-            // Actually, usually users want to see something. Let's expand the first one.
+
+            // UI Logic: Expand the first cluster by default, collapse others
             const displayStyle = index === 0 ? 'block' : 'none';
             const iconChar = index === 0 ? '▼' : '▶';
 
@@ -98,59 +104,58 @@ export async function loadAdminData() {
     }
 }
 
-// Global Toggle Function
+/**
+ * Toggles a cluster section in the accordion.
+ * Logic: Closes all other open clusters to focus on the selection.
+ * @param {number} id - Target cluster ID.
+ */
 window.toggleCluster = function (id) {
-    // Accordion Logic: Close all others, toggle current
     const allContents = document.querySelectorAll('.cluster-content');
     const allIcons = document.querySelectorAll('.collapse-icon');
-
-    // First, find the specific one to see its current state
     const targetContent = document.getElementById(`cluster-content-${id}`);
     const isCurrentlyOpen = targetContent && targetContent.style.display === 'block';
 
-    // Close ALL
+    // Collapse all sections
     allContents.forEach(el => el.style.display = 'none');
     allIcons.forEach(el => el.textContent = '▶');
 
-    // If it was closed, open it. If it was open, leave it closed (toggle behavior)
-    // Wait, user said "maximize a table the other gets collapsed". 
-    // Usually means if I click one, it opens.
+    // Expand target if it was closed
     if (!isCurrentlyOpen) {
         targetContent.style.display = 'block';
         const targetIcon = document.getElementById(`cluster-icon-${id}`);
         if (targetIcon) targetIcon.textContent = '▼';
     }
 };
-// Attach Event Listeners (ensure we don't duplicate if called multiple times, though loadAdminData re-renders container)
-// For global inputs that aren't inside the container, we need to be careful. 
-// Best to attach these once or check if already attached. 
-// Actually, simple inline onclicks in HTML or delegation here works best for dynamic content.
-// For static content (Add FY, Add Rep), we can attach here safely if we use .onclick reassignment.
 
+// --- CRUD Handlers ---
 
-
-
-// --- Handlers ---
-
-
+/**
+ * Deletes a cluster and refreshes the UI.
+ */
 window.handleDeleteCluster = async function (id) {
     const ok = await showConfirm('Delete Cluster', 'Are you sure you want to delete this cluster and all its sales reps?');
     if (ok) {
         await deleteCluster(id);
-        await loadClusters(); // Refresh dropdown in main nav
-        await loadAdminData(); // Refresh admin view
+        await loadClusters(); // Refresh global dropdown
+        await loadAdminData(); // Refresh current view
     }
 };
 
+/**
+ * Deletes a single sales rep.
+ */
 window.handleDeleteRep = async function (id) {
     const ok = await showConfirm('Delete Sales Rep', 'Are you sure you want to delete this sales rep?');
     if (ok) {
         await deleteSalesRep(id);
-        await loadClusters(); // Refresh dropdown
+        await loadClusters();
         await loadAdminData();
     }
 };
 
+/**
+ * Creates a new sales rep within a cluster.
+ */
 window.handleAddRep = async function (clusterId) {
     const input = document.getElementById(`add-rep-name-${clusterId}`);
     const name = input.value.trim();
@@ -160,7 +165,7 @@ window.handleAddRep = async function (clusterId) {
     }
 
     if (!latestFyId) {
-        await showAlert('Error', 'No Fiscal Year found');
+        await showAlert('Error', 'No Fiscal Year found. Please create a fiscal year first.');
         return;
     }
 
@@ -175,6 +180,9 @@ window.handleAddRep = async function (clusterId) {
     await loadAdminData();
 };
 
+/**
+ * Switches a cluster title to 'Edit' mode.
+ */
 window.handleEditCluster = function (id) {
     const display = document.getElementById(`cluster-name-display-${id}`);
     const input = document.getElementById(`cluster-name-input-${id}`);
@@ -189,6 +197,9 @@ window.handleEditCluster = function (id) {
     saveBtn.style.display = 'inline-block';
 };
 
+/**
+ * Saves a cluster name modification.
+ */
 window.handleSaveCluster = async function (id) {
     const input = document.getElementById(`cluster-name-input-${id}`);
     const newName = input.value.trim();
@@ -210,13 +221,16 @@ window.handleSaveCluster = async function (id) {
             throw new Error(error.error || 'Failed to update cluster');
         }
 
-        await loadClusters(); // Refresh navigation dropdown
-        await loadAdminData(); // Refresh admin view
+        await loadClusters();
+        await loadAdminData();
     } catch (error) {
         await showAlert('Error', error.message);
     }
 };
 
+/**
+ * Switches a Sales Rep name to 'Edit' mode.
+ */
 window.handleEditRep = function (id) {
     const display = document.getElementById(`rep-name-display-${id}`);
     const input = document.getElementById(`rep-name-input-${id}`);
@@ -231,6 +245,9 @@ window.handleEditRep = function (id) {
     saveBtn.style.display = 'inline-block';
 };
 
+/**
+ * Saves a Sales Rep name modification.
+ */
 window.handleSaveRep = async function (id) {
     const input = document.getElementById(`rep-name-input-${id}`);
     const newName = input.value.trim();
@@ -252,35 +269,39 @@ window.handleSaveRep = async function (id) {
             throw new Error(error.error || 'Failed to update sales rep');
         }
 
-        await loadAdminData(); // Refresh admin view
+        await loadAdminData();
     } catch (error) {
         await showAlert('Error', error.message);
     }
 };
 
-// State for upload
+// --- Bulk Upload Support ---
+
+/** @type {number|null} Tracking cluster ID for the currently open upload modal */
 let currentUploadClusterId = null;
 
+/**
+ * Opens the workload upload modal for a specific cluster.
+ */
 window.handleLoadWorkloads = function (clusterId) {
     currentUploadClusterId = clusterId;
     const modal = document.getElementById('upload-modal');
     if (modal) {
         modal.classList.add('active');
         const fileInput = document.getElementById('upload-file');
-        if (fileInput) fileInput.value = ''; // Reset file input
+        if (fileInput) fileInput.value = ''; // Clear previous selections
     }
 };
 
-// Event Listeners for Upload Modal
+// Modal Navigation Listeners
 document.addEventListener('click', (e) => {
     if (e.target.id === 'close-upload-modal' || e.target.id === 'cancel-upload-modal') {
         closeUploadModal();
     }
-    if (e.target.id === 'confirm-upload-btn') {
+    if (target.id === 'confirm-upload-btn') {
         performUploadDirectly();
     }
     if (e.target.id === 'upload-modal') {
-        // Click outside to close
         closeUploadModal();
     }
 });
@@ -291,10 +312,9 @@ function closeUploadModal() {
     currentUploadClusterId = null;
 }
 
-
 /**
- * Handles the direct file upload for workloads.
- * Sends the file and selected default quarter to the backend UPSERT endpoint.
+ * Executes a direct bulk upload of workload Excel data.
+ * Redirects to /api/workloads/upload (the UPSERT logic).
  */
 async function performUploadDirectly() {
     if (!currentUploadClusterId) return;
@@ -314,7 +334,7 @@ async function performUploadDirectly() {
     formData.append('cluster_id', currentUploadClusterId);
     formData.append('default_quarter', quarter);
 
-    // Show loading state
+    // Provide visual feedback for long-running IO
     const btn = document.getElementById('confirm-upload-btn');
     const originalText = btn.textContent;
     btn.textContent = '⏳ Uploading...';
@@ -331,14 +351,13 @@ async function performUploadDirectly() {
         if (response.ok) {
             closeUploadModal();
             await showAlert('Success', result.message || 'Workloads uploaded successfully');
-            await loadAdminData(); // Refresh admin to show any stats if needed (currently workloads are hidden in admin)
+            await loadAdminData();
         } else {
             await showAlert('Error', result.error || 'Upload failed');
         }
     } catch (error) {
         await showAlert('Error', error.message);
     } finally {
-        // Reset button state
         if (btn) {
             btn.textContent = originalText;
             btn.disabled = false;

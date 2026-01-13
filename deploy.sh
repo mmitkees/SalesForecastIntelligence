@@ -267,8 +267,9 @@ EOF
         SERVICE_PATH="/etc/systemd/system/$APP_NAME.service"
         USER_NAME=$(whoami)
         
-        # We need sudo for this. Create file locally first.
-        cat <<EOF > "${APP_NAME}.service"
+        # Create service file in /tmp first (avoids permission issues)
+        TMP_SERVICE="/tmp/${APP_NAME}.service"
+        cat <<EOF > "$TMP_SERVICE"
 [Unit]
 Description=Sales App Service
 After=network.target
@@ -287,11 +288,21 @@ WantedBy=multi-user.target
 EOF
         
         echo -e "${YELLOW}Requesting sudo permissions to install systemd service...${NC}"
-        sudo mv "${APP_NAME}.service" "$SERVICE_PATH"
-        sudo systemctl daemon-reload
-        sudo systemctl enable $APP_NAME
-        sudo systemctl restart $APP_NAME
-        echo -e "${GREEN}Systemd service installed and started.${NC}"
+        
+        # Move service file and set up systemd
+        if sudo cp "$TMP_SERVICE" "$SERVICE_PATH"; then
+            sudo chmod 644 "$SERVICE_PATH"
+            sudo systemctl daemon-reload
+            sudo systemctl enable $APP_NAME 2>/dev/null || true
+            sudo systemctl restart $APP_NAME
+            rm -f "$TMP_SERVICE"
+            echo -e "${GREEN}Systemd service installed and started.${NC}"
+        else
+            echo -e "${RED}Failed to install systemd service. Running manually...${NC}"
+            rm -f "$TMP_SERVICE"
+            nohup $WORK_DIR/venv/bin/python $WORK_DIR/app.py > $WORK_DIR/app.log 2>&1 &
+            echo -e "${GREEN}App running manually with PID $!${NC}"
+        fi
         
     else
         echo -e "${RED}Unsupported OS for auto-service creation. Running manually in background.${NC}"
