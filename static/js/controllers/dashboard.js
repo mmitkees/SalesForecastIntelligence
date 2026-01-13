@@ -12,6 +12,8 @@ import { formatCurrency, formatPercent, getPercentColorClass } from '../utils.js
 const FY_MONTHS = [5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+
+
 /** 
  * Maps frontend abstraction IDs to database field names.
  */
@@ -71,6 +73,7 @@ export async function loadDashboardData() {
 function renderDashboard(data) {
     if (!data.sales_reps) return;
 
+    // Determine current fiscal quarter for default expansion
     // Determine current fiscal quarter for default expansion
     const month = new Date().getMonth() + 1; // 1-12
     let currentQuarter = 'q3';
