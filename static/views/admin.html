@@ -1,0 +1,58 @@
+<header class="view-header">
+    <h2>Admin Panel</h2>
+    <p class="subtitle">Manage Clusters and Sales Reps</p>
+</header>
+
+<!-- Add Fiscal Year Section -->
+<!-- Add Cluster Section -->
+<div class="admin-add-section">
+    <h3>Add New Cluster</h3>
+    <!-- Upload Workloads Modal -->
+    <div class="modal-overlay" id="upload-modal">
+        <div class="modal upload-modal" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>Load Workloads</h3>
+                <button class="close-btn" id="close-upload-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="upload-file">Select Excel/CSV File</label>
+                    <input type="file" id="upload-file" accept=".xlsx, .xls, .csv" class="file-input">
+                </div>
+                <div class="form-group">
+                    <label for="default-quarter">Default Quarter (if no date found)</label>
+                    <select id="default-quarter">
+                        <option value="Q3">Q3 (Dec - Feb)</option>
+                        <option value="Q1">Q1 (Jun - Aug)</option>
+                        <option value="Q2">Q2 (Sep - Nov)</option>
+                        <option value="Q4">Q4 (Mar - May)</option>
+                    </select>
+                    <small class="text-muted">Workloads without a valid start date will be assigned to this
+                        quarter.</small>
+                </div>
+                <div class="form-group">
+                    <p class="text-muted" style="font-size: 0.85rem;">
+                        <strong>Note:</strong> Existing workloads with matching Opt IDs will be updated. Others will be
+                        added. No data will be deleted.
+                    </p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary-btn" id="cancel-upload-modal">Cancel</button>
+                <button class="primary-btn" id="confirm-upload-btn">🚀 Upload</button>
+            </div>
+        </div>
+    </div>
+    <div class="admin-form-row">
+        <input type="text" id="new-cluster-name" placeholder="Cluster Name">
+        <button class="primary-btn" id="add-cluster-btn">+ Add Cluster</button>
+    </div>
+</div>
+
+<!-- Add Sales Rep Section -->
+
+
+<!-- Clusters with Tables -->
+<div id="admin-clusters-container">
+    <p class="loading">Loading clusters...</p>
+</div>

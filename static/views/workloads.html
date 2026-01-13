@@ -1,0 +1,55 @@
+<header class="view-header">
+    <div class="header-main">
+        <h2>Workloads</h2>
+    </div>
+    <div class="header-actions">
+        <!-- Button moved to filters bar -->
+    </div>
+</header>
+
+<!-- Filters -->
+<div class="filters-bar">
+    <select id="filter-account-manager">
+        <option value="">All Account Managers</option>
+    </select>
+    <select id="filter-forecast-type">
+        <option value="">All Forecast Types</option>
+        <option value="Forecast">Forecast</option>
+        <option value="Upside">Upside</option>
+        <option value="Won">Won</option>
+    </select>
+    <select id="filter-customer-type">
+        <option value="">All Customer Types</option>
+        <option value="New Logo">New Logo</option>
+        <option value="Existing">Existing Customer</option>
+    </select>
+    <select id="filter-workload-type">
+        <option value="">All Workload Types</option>
+        <option value="Non-Reportable WL">Non-Reportable WL</option>
+        <option value="Temp/Forfieted">Temp/Forfieted</option>
+        <option value="Sticky New WL">Sticky New WL</option>
+        <option value="Resources expansion">Resources expansion</option>
+    </select>
+    <button id="add-workload-btn" class="primary-btn" style="margin-left: auto;">+ Add Workload</button>
+</div>
+
+<!-- Dynamic Workloads Container -->
+<div id="workloads-quarters-container"></div>
+
+<!-- Comments Popup Modal -->
+<div class="modal-overlay" id="comments-modal">
+    <div class="modal comments-modal">
+        <div class="modal-header">
+            <h3 id="comments-modal-title">Comments</h3>
+            <button class="close-btn" id="close-comments-modal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <textarea id="comments-modal-text" rows="6" placeholder="Enter comments..."></textarea>
+        </div>
+        <div class="modal-footer">
+            <button class="secondary-btn" id="cancel-comments-modal">Cancel</button>
+            <button class="primary-btn" id="save-comments-modal">Save</button>
+        </div>
+    </div>
+</div>
+</div>

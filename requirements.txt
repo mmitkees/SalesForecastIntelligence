@@ -1,0 +1,7 @@
+flask
+sqlalchemy
+oracledb
+pandas
+openpyxl
+python-dateutil
+python-dotenv

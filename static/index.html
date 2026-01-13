@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Consumption Intelligence</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Flatpickr Date Picker -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+
+<body>
+    <header class="top-nav">
+        <div class="top-nav-container">
+            <div class="logo">
+                <div class="logo-icon">📊</div>
+                <h1>Sales Intel</h1>
+            </div>
+            <nav class="nav-menu">
+                <button class="nav-item active" data-view="dashboard">
+                    <span class="nav-icon">📈</span>
+                    Dashboard
+                </button>
+                <button class="nav-item" data-view="workloads">
+                    <span class="nav-icon">📋</span>
+                    Workloads
+                </button>
+                <button class="nav-item" data-view="analytics">
+                    <span class="nav-icon">📊</span>
+                    Analytics
+                </button>
+                <button class="nav-item" data-view="admin">
+                    <span class="nav-icon">⚙️</span>
+                    Admin
+                </button>
+            </nav>
+            <div class="top-nav-controls">
+                <div class="cluster-selector-top">
+                    <select id="fiscal-year-select" style="margin-right: 10px;">
+                        <option value="">FY...</option>
+                    </select>
+                    <select id="cluster-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+
+            </div>
+        </div>
+    </header>
+
+    <div class="app-container">
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- View Container -->
+            <div id="view-container">
+                <!-- Content loaded dynamically via AJAX -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Add/Edit Workload Modal -->
+    <div class="modal-overlay" id="workload-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Add Workload</h3>
+                <button class="close-btn" id="close-modal">&times;</button>
+            </div>
+            <form id="workload-form">
+                <input type="hidden" id="workload-id">
+                <div class="form-group">
+                    <label for="wl-sales-rep">Sales Rep</label>
+                    <select id="wl-sales-rep" required>
+                        <option value="">Select Sales Rep</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 3;">
+                        <label for="wl-account">Account Name</label>
+                        <input type="text" id="wl-account" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-country">Country</label>
+                        <input type="text" id="wl-country" placeholder="e.g. AE" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-opt-id">Opt ID</label>
+                        <input type="text" id="wl-opt-id" placeholder="ID" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-start-date">Start Date</label>
+                        <input type="date" id="wl-start-date" required>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-forecast-type">Forecast</label>
+                        <select id="wl-forecast-type" required>
+                            <option value="Forecast">Forecast</option>
+                            <option value="Upside">Upside</option>
+                            <option value="Won">Won</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-customer-type">Customer</label>
+                        <select id="wl-customer-type" required>
+                            <option value="Existing customer">Existing Customer</option>
+                            <option value="New Logo">New Logo</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label for="wl-workload-type">Workload</label>
+                        <select id="wl-workload-type" required>
+                            <option value="">Type</option>
+                            <option value="Non-Reportable WL">Non-Reportable WL</option>
+                            <option value="Temp/Forfieted">Temp/Forfieted</option>
+                            <option value="Sticky New WL">Sticky New WL</option>
+                            <option value="Resources expansion">Resources expansion</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="monthly-amounts-row">
+                    <div class="form-group">
+                        <label id="lbl-month-1">Month 1 ($)</label>
+                        <input type="number" id="wl-month-1" step="0.01" value="0" required>
+                    </div>
+                    <div class="form-group">
+                        <label id="lbl-month-2">Month 2 ($)</label>
+                        <input type="number" id="wl-month-2" step="0.01" value="0" required>
+                    </div>
+                    <div class="form-group">
+                        <label id="lbl-month-3">Month 3 ($)</label>
+                        <input type="number" id="wl-month-3" step="0.01" value="0" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="wl-comments">Comments</label>
+                    <textarea id="wl-comments" rows="2" required></textarea>
+                </div>
+                <div class="form-actions-big">
+                    <button type="button" class="secondary-btn" id="cancel-modal">Cancel</button>
+                    <button type="submit" class="primary-btn">Save Workload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Upload Data Modal -->
+    <div class="modal-overlay" id="upload-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Upload Sales Data</h3>
+                <button class="close-btn" id="close-upload-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Upload the <strong>FY26 Consumption Numbers</strong> sheet (Excel or CSV).</p>
+                <form id="upload-form">
+                    <div class="form-group">
+                        <label for="upload-file">Select File</label>
+                        <input type="file" id="upload-file" accept=".xlsx, .xls, .csv" required>
+                    </div>
+                    <div class="form-actions-big">
+                        <button type="button" class="secondary-btn" id="cancel-upload">Cancel</button>
+                        <button type="submit" class="primary-btn">Upload & Import</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div class="modal-overlay" id="confirm-modal">
+        <div class="modal confirm-modal">
+            <div class="modal-header">
+                <h3 id="confirm-title">Confirm</h3>
+                <button class="close-btn" id="confirm-close">&times;</button>
+            </div>
+            <div class="confirm-body">
+                <p id="confirm-message">Are you sure?</p>
+            </div>
+            <div class="confirm-actions">
+                <button class="secondary-btn" id="confirm-cancel">Cancel</button>
+                <button class="danger-btn" id="confirm-ok">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alert Modal -->
+    <div class="modal-overlay" id="alert-modal">
+        <div class="modal confirm-modal">
+            <div class="modal-header">
+                <h3 id="alert-title">Alert</h3>
+                <button class="close-btn" id="alert-close">&times;</button>
+            </div>
+            <div class="confirm-body">
+                <p id="alert-message">Action failed</p>
+            </div>
+            <div class="confirm-actions">
+                <button class="primary-btn" id="alert-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+
+</html>

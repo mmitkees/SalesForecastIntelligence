@@ -1,0 +1,938 @@
+let currentClusterId = null;
+let salesReps = [];
+let workloads = [];
+let currentView = 'dashboard';
+let currentSort = { field: 'total', order: 'desc' };
+
+// ===== DOM Elements (Static) =====
+const clusterSelect = document.getElementById('cluster-select');
+const navItems = document.querySelectorAll('.nav-item');
+const seedBtn = document.getElementById('seed-btn');
+const viewContainer = document.getElementById('view-container');
+
+// Modal Elements
+const workloadModal = document.getElementById('workload-modal');
+const closeModalBtn = document.getElementById('close-modal');
+const cancelModalBtn = document.getElementById('cancel-modal');
+const workloadForm = document.getElementById('workload-form');
+
+// Confirm Modal Elements
+const confirmModal = document.getElementById('confirm-modal');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmMessage = document.getElementById('confirm-message');
+const confirmClose = document.getElementById('confirm-close');
+const confirmCancel = document.getElementById('confirm-cancel');
+const confirmOk = document.getElementById('confirm-ok');
+
+// Alert Modal Elements
+const alertModal = document.getElementById('alert-modal');
+const alertTitle = document.getElementById('alert-title');
+const alertMessage = document.getElementById('alert-message');
+const alertClose = document.getElementById('alert-close');
+const alertOk = document.getElementById('alert-ok');
+
+// ===== Utilities =====
+function formatCurrency(value) {
+    return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }).format(value);
+}
+
+function formatPercent(value) {
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function showConfirm(title, message) {
+    return new Promise((resolve) => {
+        confirmTitle.textContent = title;
+        confirmMessage.textContent = message;
+        confirmOk.textContent = title.toLowerCase().includes('delete') ? 'Delete' : 'OK';
+        confirmModal.classList.add('active');
+
+        const handleOk = () => {
+            cleanup();
+            resolve(true);
+        };
+
+        const handleCancel = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        const cleanup = () => {
+            confirmOk.removeEventListener('click', handleOk);
+            confirmCancel.removeEventListener('click', handleCancel);
+            confirmClose.removeEventListener('click', handleCancel);
+            confirmModal.classList.remove('active');
+        };
+
+        confirmOk.addEventListener('click', handleOk);
+        confirmCancel.addEventListener('click', handleCancel);
+        confirmClose.addEventListener('click', handleCancel);
+    });
+}
+
+function showAlert(title, message) {
+    return new Promise((resolve) => {
+        alertTitle.textContent = title;
+        alertMessage.textContent = message;
+        alertModal.classList.add('active');
+
+        const handleOk = () => {
+            cleanup();
+            resolve();
+        };
+
+        const cleanup = () => {
+            alertOk.removeEventListener('click', handleOk);
+            alertClose.removeEventListener('click', handleOk);
+            alertModal.classList.remove('active');
+        };
+
+        alertOk.addEventListener('click', handleOk);
+        alertClose.addEventListener('click', handleOk);
+    });
+}
+
+// ===== API Calls =====
+async function fetchClusters() {
+    const response = await fetch(`/api/clusters?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+async function fetchDashboard(clusterId) {
+    const response = await fetch(`/api/dashboard/${clusterId}?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+async function fetchSalesReps(clusterId) {
+    const response = await fetch(`/api/sales_reps?cluster_id=${clusterId}&t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+async function fetchWorkloads(clusterId) {
+    const response = await fetch(`/api/workloads?cluster_id=${clusterId}&t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+async function createWorkload(data) {
+    const response = await fetch('/api/workloads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+async function updateWorkload(id, data) {
+    const response = await fetch(`/api/workloads/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+async function deleteWorkload(id) {
+    await fetch(`/api/workloads/${id}`, { method: 'DELETE' });
+}
+
+async function seedDatabase() {
+    const response = await fetch('/api/seed', { method: 'POST' });
+    return response.json();
+}
+
+// ===== Admin Page API Functions =====
+async function createCluster(name) {
+    const response = await fetch('/api/clusters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    return response.json();
+}
+
+async function deleteCluster(id) {
+    await fetch(`/api/clusters/${id}`, { method: 'DELETE' });
+}
+
+async function createSalesRep(data) {
+    const response = await fetch('/api/sales_reps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    return response.json();
+}
+
+async function deleteSalesRep(id) {
+    await fetch(`/api/sales_reps/${id}`, { method: 'DELETE' });
+}
+
+async function fetchAllSalesReps() {
+    const response = await fetch(`/api/sales_reps?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+// ===== View Rendering Logic =====
+
+async function loadView(viewName) {
+    currentView = viewName;
+
+    // Update nav state
+    navItems.forEach(item => {
+        if (item.dataset.view === viewName) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+
+    try {
+        // Fetch view HTML
+        const response = await fetch(`/views/${viewName}.html`);
+        if (!response.ok) throw new Error(`Failed to load view: ${viewName}`);
+
+        const html = await response.text();
+        viewContainer.innerHTML = html;
+
+        // Initialize view specific data
+        if (currentClusterId) {
+            if (viewName === 'dashboard') {
+                await loadDashboardData();
+            } else if (viewName === 'workloads') {
+                await loadWorkloadsData();
+            } else if (viewName === 'admin') {
+                await loadAdminData();
+            }
+        } else if (viewName === 'admin') {
+            await loadAdminData(); // Can load admin without current cluster selected
+        }
+
+    } catch (error) {
+        console.error(error);
+        viewContainer.innerHTML = `<p class="error-message">Error loading page: ${error.message}</p>`;
+    }
+}
+
+// --- Dashboard Logic ---
+async function loadDashboardData() {
+    if (!document.getElementById('dashboard-table')) return;
+
+    const dashboardData = await fetchDashboard(currentClusterId);
+    renderDashboard(dashboardData);
+}
+
+function renderDashboard(data) {
+    const tbody = document.getElementById('dashboard-tbody');
+    if (!tbody) return;
+
+    // KPIs
+    document.getElementById('kpi-total-exit').textContent = formatCurrency(data.kpis.total_fy26_q2_exit);
+    document.getElementById('kpi-avg-qoq').textContent = formatPercent(data.kpis.avg_qoq_growth);
+    document.getElementById('kpi-total-upside').textContent = formatCurrency(data.kpis.total_upside);
+    document.getElementById('kpi-pct-upside').textContent = `${data.kpis.pct_exit_dependent_on_upside.toFixed(1)}%`;
+
+    if (data.sales_reps.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" class="loading">No sales reps found</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = data.sales_reps.map(rep => `
+        <tr>
+            <td>${rep.name}</td>
+            <td>${formatCurrency(rep.fy25_q4_exit)}</td>
+            <td style="color: ${rep.q1_qoq_pct >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'}">${formatPercent(rep.q1_qoq_pct)}</td>
+            <td>${formatCurrency(rep.fy26_q1_exit)}</td>
+            <td><strong>${formatCurrency(rep.fy26_q2_exit)}</strong></td>
+            <td>${formatCurrency(rep.december_upside)}</td>
+            <td>${formatCurrency(rep.january_upside)}</td>
+            <td>${formatCurrency(rep.february_upside)}</td>
+            <td>${formatCurrency(rep.total_upside)}</td>
+            <td><span class="risk-badge ${rep.risk_flag.toLowerCase().replace('_', '-')}">${rep.risk_flag.replace('_', ' ')}</span></td>
+        </tr>
+    `).join('');
+}
+
+// --- Workloads Logic ---
+async function loadWorkloadsData() {
+    if (!document.getElementById('workloads-table-q3')) return; // Check for Q3 table as proxy
+
+    // Load reps for dropdowns
+    salesReps = await fetchSalesReps(currentClusterId);
+    populateSalesRepDropdown(salesReps); // For modal
+    populateAccountManagerFilter(salesReps); // For filter bar
+
+    workloads = await fetchWorkloads(currentClusterId);
+
+    reRenderWorkloadTables();
+}
+
+function deriveQuarter(dateStr) {
+    if (!dateStr) return 'Q3';
+    try {
+        const month = new Date(dateStr).getMonth() + 1; // 1-12
+        if ([12, 1, 2].includes(month)) return 'Q3';
+        if ([3, 4, 5].includes(month)) return 'Q4';
+        return 'Q3';
+    } catch (e) {
+        return 'Q3';
+    }
+}
+
+function reRenderWorkloadTables() {
+    // Split data by quarter (default to Q3 if null)
+    const q3Data = workloads.filter(w => w.quarter === 'Q3' || !w.quarter);
+    const q4Data = workloads.filter(w => w.quarter === 'Q4');
+
+    const q3FilteredCount = renderWorkloadTable(q3Data, 'workloads-tbody-q3', 'Q3');
+    const q4FilteredCount = renderWorkloadTable(q4Data, 'workloads-tbody-q4', 'Q4');
+
+    // Update workload counts with FILTERED count
+    const q3Count = document.getElementById('q3-count');
+    const q4Count = document.getElementById('q4-count');
+    if (q3Count) q3Count.textContent = `${q3FilteredCount} workloads`;
+    if (q4Count) q4Count.textContent = `${q4FilteredCount} workloads`;
+}
+
+function populateAccountManagerFilter(reps) {
+    const filter = document.getElementById('filter-account-manager');
+    if (!filter) return;
+
+    const currentVal = filter.value;
+    filter.innerHTML = '<option value="">All Account Managers</option>' +
+        reps.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    filter.value = currentVal; // Restore selection
+}
+
+function renderWorkloadTable(data, tbodyId, quarter) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+
+    // Apply filters
+    let filtered = data;
+    const amFilter = document.getElementById('filter-account-manager');
+    const forecastFilter = document.getElementById('filter-forecast-type');
+    const customerFilter = document.getElementById('filter-customer-type');
+    const workloadTypeFilter = document.getElementById('filter-workload-type');
+
+    if (amFilter && amFilter.value) {
+        filtered = filtered.filter(w => w.sales_rep_id === parseInt(amFilter.value));
+    }
+    if (forecastFilter && forecastFilter.value) {
+        filtered = filtered.filter(w => w.forecast_type === forecastFilter.value);
+    }
+    if (customerFilter && customerFilter.value) {
+        filtered = filtered.filter(w => w.customer_type && w.customer_type.toLowerCase().includes(customerFilter.value.toLowerCase()));
+    }
+    if (workloadTypeFilter && workloadTypeFilter.value) {
+        filtered = filtered.filter(w => w.workload_type && w.workload_type.toLowerCase().includes(workloadTypeFilter.value.toLowerCase()));
+    }
+
+    // Apply Sorting
+    filtered.sort((a, b) => {
+        let valA, valB;
+        switch (currentSort.field) {
+            case 'account': valA = a.account_name || ''; valB = b.account_name || ''; break;
+            case 'sales_rep': valA = a.sales_rep_name || ''; valB = b.sales_rep_name || ''; break;
+            case 'country': valA = a.country || ''; valB = b.country || ''; break;
+            case 'forecast': valA = a.forecast_type; valB = b.forecast_type; break;
+            case 'type': valA = a.customer_type || ''; valB = b.customer_type || ''; break;
+            case 'workload': valA = a.workload_type || ''; valB = b.workload_type || ''; break;
+            case 'opt_id': valA = a.opt_id || ''; valB = b.opt_id || ''; break;
+            case 'start_date': valA = a.consumption_start_date || ''; valB = b.consumption_start_date || ''; break;
+            case 'total': valA = a.total_amount; valB = b.total_amount; break;
+            default: valA = a.id; valB = b.id;
+        }
+
+        if (valA < valB) return currentSort.order === 'asc' ? -1 : 1;
+        if (valA > valB) return currentSort.order === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="14" class="loading">No workloads found for ${quarter}</td></tr>`;
+        return 0;
+    }
+
+    tbody.innerHTML = filtered.map(w => `
+        <tr data-id="${w.id}">
+            <td>
+                <select class="inline-select forecast-select ${w.forecast_type.toLowerCase()}" onchange="handleInlineEdit(${w.id}, 'forecast_type', this.value)">
+                    <option value="Forecast" ${w.forecast_type === 'Forecast' ? 'selected' : ''}>Forecast</option>
+                    <option value="Upside" ${w.forecast_type === 'Upside' ? 'selected' : ''}>Upside</option>
+                    <option value="Won" ${w.forecast_type === 'Won' ? 'selected' : ''}>Won</option>
+                </select>
+            </td>
+            <td>
+                <input type="text" class="inline-input account-input" value="${w.account_name || ''}" 
+                       onchange="handleInlineEdit(${w.id}, 'account_name', this.value)">
+            </td>
+            <td>
+                <span class="sales-rep-name">${w.sales_rep_name || 'N/A'}</span>
+            </td>
+            <td>
+                <input type="text" class="inline-input country-input" style="text-align: center; min-width: 40px;" 
+                       value="${w.country || ''}" placeholder="AE"
+                       onchange="handleInlineEdit(${w.id}, 'country', this.value)">
+            </td>
+            <td>
+                <select class="inline-select customer-select" onchange="handleInlineEdit(${w.id}, 'customer_type', this.value)">
+                    <option value="Existing Customer" ${w.customer_type === 'Existing Customer' ? 'selected' : ''}>Existing Customer</option>
+                    <option value="New Logo" ${w.customer_type === 'New Logo' ? 'selected' : ''}>New Logo</option>
+                </select>
+            </td>
+            <td>
+                <select class="inline-select workload-select" onchange="handleInlineEdit(${w.id}, 'workload_type', this.value)">
+                    <option value="Non-Reportable WL" ${w.workload_type === 'Non-Reportable WL' ? 'selected' : ''}>Non-Reportable WL</option>
+                    <option value="Temp/Forfieted" ${w.workload_type === 'Temp/Forfieted' ? 'selected' : ''}>Temp/Forfieted</option>
+                    <option value="Sticky New WL" ${w.workload_type === 'Sticky New WL' ? 'selected' : ''}>Sticky New WL</option>
+                    <option value="Resources expansion" ${w.workload_type === 'Resources expansion' ? 'selected' : ''}>Resources expansion</option>
+                </select>
+            </td>
+            <td>
+                <input type="text" class="inline-input opt-id-input" value="${w.opt_id || ''}" 
+                       placeholder="Opt ID" style="text-align: center; min-width: 60px;"
+                       onchange="handleInlineEdit(${w.id}, 'opt_id', this.value)">
+            </td>
+            <td>
+                <input type="date" class="inline-date-input" value="${w.consumption_start_date || ''}" 
+                       onchange="handleInlineEdit(${w.id}, 'consumption_start_date', this.value)">
+            </td>
+            
+            <td><input type="number" class="inline-input" value="${w.month_1_amt}" onchange="handleInlineEdit(${w.id}, 'month_1_amt', this.value)"></td>
+            <td><input type="number" class="inline-input" value="${w.month_2_amt}" onchange="handleInlineEdit(${w.id}, 'month_2_amt', this.value)"></td>
+            <td><input type="number" class="inline-input" value="${w.month_3_amt}" onchange="handleInlineEdit(${w.id}, 'month_3_amt', this.value)"></td>
+            
+            <td class="total-col"><strong>${formatCurrency(w.total_amount)}</strong></td>
+            
+            <td>
+                <button class="comment-icon-btn ${w.comments ? 'has-comment' : ''}" 
+                        onclick="openCommentsModal(${w.id}, '${w.account_name}')" 
+                        title="${w.comments || 'Add comment'}">
+                    💬
+                </button>
+            </td>
+            
+            <td>
+                <button class="action-btn delete" onclick="removeWorkload(${w.id})" title="Delete Workload">✖</button>
+            </td>
+        </tr>
+    `).join('');
+
+    return filtered.length;
+}
+
+async function handleInlineEdit(id, field, value) {
+    // Optimistic UI update
+    const workload = workloads.find(w => w.id === id);
+    if (!workload) return;
+
+    // Type coercion
+    if (['month_1_amt', 'month_2_amt', 'month_3_amt'].includes(field)) {
+        value = parseFloat(value) || 0;
+    }
+
+    // Update local state
+    workload[field] = value;
+
+    // Recalculate total if amount changed
+    if (field.includes('amt')) {
+        workload.total_amount = workload.month_1_amt + workload.month_2_amt + workload.month_3_amt;
+        // Update DOM total immediately
+        const row = document.querySelector(`tr[data-id="${id}"]`);
+        if (row) {
+            row.querySelector('.total-col strong').textContent = formatCurrency(workload.total_amount);
+        }
+    }
+
+    // Should also update dropdown color if forecast type changed
+    if (field === 'forecast_type') {
+        const select = document.querySelector(`tr[data-id="${id}"] .forecast-select`);
+        if (select) {
+            select.className = `inline-select forecast-select ${value.toLowerCase()}`;
+        }
+    }
+
+    // Recalculate quarter if date changed
+    if (field === 'consumption_start_date') {
+        const newQuarter = deriveQuarter(value);
+        if (workload.quarter !== newQuarter) {
+            workload.quarter = newQuarter;
+            reRenderWorkloadTables();
+            // Don't need to do specific DOM updates as reRender handles it
+            // Return early to skip specific DOM patches?
+            // Actually, proceed to save API call.
+        }
+    }
+
+    // Send API request
+    try {
+        await updateWorkload(id, { [field]: value });
+    } catch (e) {
+        console.error("Failed to save edit", e);
+        // Ideally revert UI here
+    }
+}
+
+function populateSalesRepDropdown(reps) {
+    const select = document.getElementById('wl-sales-rep');
+    if (select) {
+        select.innerHTML = '<option value="">Select Sales Rep</option>' +
+            reps.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    }
+}
+
+// --- Admin Logic ---
+async function loadAdminData() {
+    const container = document.getElementById('admin-clusters-container');
+    if (!container) return;
+
+    try {
+        container.innerHTML = '<p class="loading">Loading clusters...</p>';
+
+        const [clusters, allReps] = await Promise.all([
+            fetchClusters(),
+            fetchAllSalesReps()
+        ]);
+
+        // Populate cluster dropdown for adding reps (this element might not exist if view structure changed, check safely)
+        const repClusterSelect = document.getElementById('new-rep-cluster');
+        if (repClusterSelect && clusters && clusters.length > 0) {
+            repClusterSelect.innerHTML = '<option value="">Select Cluster</option>' +
+                clusters.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        }
+
+        if (!clusters || clusters.length === 0) {
+            container.innerHTML = '<div class="admin-section"><p class="no-reps">No clusters found. Add a cluster above to get started.</p></div>';
+            return;
+        }
+
+        container.innerHTML = clusters.map(cluster => {
+            const clusterReps = Array.isArray(allReps) ? allReps.filter(r => r.cluster_id === cluster.id) : [];
+            return `
+                <div class="admin-section">
+                    <div class="cluster-table-header">
+                        <h3>📁 ${cluster.name}</h3>
+                        <button class="delete-cluster-btn" onclick="handleDeleteCluster(${cluster.id})">
+                            <span class="delete-icon">✖</span> Delete Cluster
+                        </button>
+                    </div>
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>Sales Rep Name</th>
+                                <th style="width: 80px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${clusterReps.map(rep => `
+                                <tr>
+                                    <td>${rep.name}</td>
+                                    <td><button class="action-btn delete" onclick="handleDeleteRep(${rep.id})">✖</button></td>
+                                </tr>
+                            `).join('')}
+                            <tr class="add-row">
+                                <td><input type="text" id="add-rep-name-${cluster.id}" placeholder="Enter sales rep name..."></td>
+                                <td><button class="action-btn add" onclick="handleAddRep(${cluster.id})">➕</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading admin data:', error);
+        container.innerHTML = `<p class="error-message">Error loading data: ${error.message}. Please try refreshing the page.</p>`;
+    }
+}
+
+// ===== Global Event Handlers =====
+
+async function loadClusters() {
+    const clusters = await fetchClusters();
+    if (clusters.length === 0) {
+        clusterSelect.innerHTML = '<option value="">No clusters - Click Seed</option>';
+        return;
+    }
+    clusterSelect.innerHTML = clusters.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+    // Preserve selection if valid, otherwise select first
+    if (currentClusterId && clusters.some(c => c.id === currentClusterId)) {
+        clusterSelect.value = currentClusterId;
+    } else {
+        currentClusterId = clusters[0].id;
+    }
+
+    // Refresh current view data
+    if (currentView === 'dashboard') await loadDashboardData();
+    if (currentView === 'workloads') await loadWorkloadsData();
+    // Admin refreshes itself
+}
+
+
+// ===== Modal & Form Handlers =====
+function openModal(title = 'Add Workload') {
+    document.getElementById('modal-title').textContent = title;
+    workloadModal.classList.add('active');
+
+    // Reset labels to generic (will update when date is selected)
+    document.getElementById('lbl-month-1').textContent = 'Month 1 ($)';
+    document.getElementById('lbl-month-2').textContent = 'Month 2 ($)';
+    document.getElementById('lbl-month-3').textContent = 'Month 3 ($)';
+}
+
+function closeModal() {
+    workloadModal.classList.remove('active');
+    workloadForm.reset();
+    document.getElementById('workload-id').value = '';
+
+    // Reset labels
+    document.getElementById('lbl-month-1').textContent = 'Month 1 ($)';
+    document.getElementById('lbl-month-2').textContent = 'Month 2 ($)';
+    document.getElementById('lbl-month-3').textContent = 'Month 3 ($)';
+}
+
+async function handleFormSubmit(e) {
+    e.preventDefault();
+
+    const workloadId = document.getElementById('workload-id').value;
+    const data = {
+        sales_rep_id: parseInt(document.getElementById('wl-sales-rep').value),
+        account_name: document.getElementById('wl-account').value,
+        country: document.getElementById('wl-country').value,
+        opt_id: document.getElementById('wl-opt-id').value,
+        forecast_type: document.getElementById('wl-forecast-type').value,
+        customer_type: document.getElementById('wl-customer-type').value,
+        workload_type: document.getElementById('wl-workload-type').value,
+        comments: document.getElementById('wl-comments').value,
+        consumption_start_date: document.getElementById('wl-start-date').value,
+        month_1_amt: parseFloat(document.getElementById('wl-month-1').value) || 0,
+        month_2_amt: parseFloat(document.getElementById('wl-month-2').value) || 0,
+        month_3_amt: parseFloat(document.getElementById('wl-month-3').value) || 0
+    };
+
+    if (workloadId) {
+        await updateWorkload(workloadId, data);
+    } else {
+        await createWorkload(data);
+    }
+
+    closeModal();
+    if (currentView === 'workloads') await loadWorkloadsData();
+    if (currentView === 'dashboard') await loadDashboardData();
+}
+
+window.removeWorkload = async function (id) {
+    const ok = await showConfirm('Delete Workload', 'Are you sure you want to delete this workload?');
+    if (ok) {
+        await deleteWorkload(id);
+        if (currentView === 'workloads') await loadWorkloadsData();
+    }
+};
+
+window.handleDeleteCluster = async function (id) {
+    const ok = await showConfirm('Delete Cluster', 'Are you sure you want to delete this cluster and all its sales reps?');
+    if (ok) {
+        await deleteCluster(id);
+        await loadClusters(); // Refresh dropdown
+        await loadAdminData();
+    }
+};
+
+window.handleDeleteRep = async function (id) {
+    const ok = await showConfirm('Delete Sales Rep', 'Are you sure you want to delete this sales rep?');
+    if (ok) {
+        await deleteSalesRep(id);
+        await loadClusters(); // Refresh dropdown
+        await loadAdminData();
+    }
+};
+
+window.handleAddRep = async function (clusterId) {
+    const input = document.getElementById(`add-rep-name-${clusterId}`);
+    const name = input.value.trim();
+    if (!name) {
+        await showAlert('Missing Information', 'Please enter a name');
+        return;
+    }
+    await createSalesRep({
+        cluster_id: clusterId,
+        name,
+        fy25_q4_exit: 0,
+        fy26_q1_exit: 0
+    });
+    await loadClusters();
+    await loadAdminData();
+};
+
+// ===== Event Delegation & Listeners =====
+
+// Navigation
+navItems.forEach(item => {
+    item.addEventListener('click', () => {
+        loadView(item.dataset.view);
+    });
+});
+
+// Cluster Select
+clusterSelect.addEventListener('change', async (e) => {
+    currentClusterId = parseInt(e.target.value);
+    // Refresh current view
+    if (currentView === 'dashboard') await loadDashboardData();
+    if (currentView === 'workloads') await loadWorkloadsData();
+});
+
+// Seed Button
+seedBtn.addEventListener('click', async () => {
+    seedBtn.textContent = '⏳';
+    await seedDatabase();
+    seedBtn.textContent = '✅';
+    setTimeout(() => seedBtn.textContent = '🔄', 2000);
+    await loadClusters();
+    if (currentView === 'admin') await loadAdminData();
+});
+
+// Modal Actions
+closeModalBtn.addEventListener('click', closeModal);
+cancelModalBtn.addEventListener('click', closeModal);
+workloadForm.addEventListener('submit', handleFormSubmit);
+
+// Modal Start Date Change Listener - auto-update monthly labels based on selected date
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'wl-start-date') {
+        const dateVal = e.target.value;
+        if (!dateVal) return;
+
+        const month = new Date(dateVal).getMonth() + 1; // 1-12
+        // Q3: Dec(12), Jan(1), Feb(2) -> labels: December, January, February
+        // Q4: Mar(3), Apr(4), May(5) -> labels: March, April, May
+        let labels;
+        if (month === 12 || month === 1 || month === 2) {
+            labels = ['December ($)', 'January ($)', 'February ($)'];
+        } else if (month >= 3 && month <= 5) {
+            labels = ['March ($)', 'April ($)', 'May ($)'];
+        } else {
+            // Default to Q3 structure for other months
+            labels = ['Month 1 ($)', 'Month 2 ($)', 'Month 3 ($)'];
+        }
+        document.getElementById('lbl-month-1').textContent = labels[0];
+        document.getElementById('lbl-month-2').textContent = labels[1];
+        document.getElementById('lbl-month-3').textContent = labels[2];
+    }
+});
+
+// Global Click Delegation (for dynamic elements)
+document.addEventListener('click', async (e) => {
+    const target = e.target;
+
+    // Sortable Headers
+    if (target.classList.contains('sortable')) {
+        const field = target.dataset.sort;
+        if (currentSort.field === field) {
+            currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.field = field;
+            currentSort.order = 'asc';
+        }
+        reRenderWorkloadTables();
+    }
+
+    // Add Workload Button
+    if (target.id === 'add-workload-btn') {
+        openModal();
+    }
+
+    // Upload Excel Button
+    if (target.id === 'upload-excel-btn') {
+        document.getElementById('excel-upload').click();
+    }
+
+    // Add Cluster Button
+    if (target.id === 'add-cluster-btn') {
+        const nameInput = document.getElementById('new-cluster-name');
+        const name = nameInput.value.trim();
+        if (!name) {
+            await showAlert('Missing Information', 'Please enter a cluster name');
+            return;
+        }
+        await createCluster(name);
+        nameInput.value = '';
+        await loadClusters();
+        await loadAdminData();
+    }
+});
+
+// Global Change Delegation (for dynamic filters)
+document.addEventListener('change', async (e) => {
+    const filters = ['filter-forecast-type', 'filter-customer-type', 'filter-account-manager', 'filter-workload-type'];
+    if (filters.includes(e.target.id)) {
+        const q3Data = workloads.filter(w => w.quarter === 'Q3' || !w.quarter);
+        const q4Data = workloads.filter(w => w.quarter === 'Q4');
+        renderWorkloadTable(q3Data, 'workloads-tbody-q3', 'Q3');
+        renderWorkloadTable(q4Data, 'workloads-tbody-q4', 'Q4');
+    }
+
+    if (e.target.id === 'excel-upload') {
+        const file = e.target.files[0];
+        if (file) {
+            await uploadExcel(file);
+            e.target.value = ''; // Reset
+        }
+    }
+});
+
+async function uploadExcel(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('cluster_id', currentClusterId);
+
+    try {
+        const btn = document.getElementById('upload-excel-btn');
+        const originalText = btn.textContent;
+        btn.textContent = '⏳ Uploading...';
+        btn.disabled = true;
+
+        const response = await fetch('/api/workloads/upload', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Upload failed');
+        }
+
+        const result = await response.json();
+        await showAlert('Success', result.message);
+        await loadWorkloadsData();
+    } catch (e) {
+        console.error("Excel upload failed", e);
+        await showAlert('Upload Failed', e.message);
+    } finally {
+        const btn = document.getElementById('upload-excel-btn');
+        if (btn) {
+            btn.textContent = '📤 Upload Excel';
+            btn.disabled = false;
+        }
+    }
+}
+
+
+// ===== Comments Modal =====
+let currentCommentsWorkloadId = null;
+
+window.openCommentsModal = function (workloadId, accountName) {
+    currentCommentsWorkloadId = workloadId;
+    const workload = workloads.find(w => w.id === workloadId);
+
+    const modal = document.getElementById('comments-modal');
+    const title = document.getElementById('comments-modal-title');
+    const textarea = document.getElementById('comments-modal-text');
+
+    if (modal && title && textarea) {
+        title.textContent = `Comments - ${accountName}`;
+        textarea.value = workload?.comments || '';
+        modal.classList.add('active');
+        textarea.focus();
+    }
+};
+
+function closeCommentsModal() {
+    const modal = document.getElementById('comments-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+    currentCommentsWorkloadId = null;
+}
+
+async function saveComments() {
+    if (!currentCommentsWorkloadId) return;
+
+    const textarea = document.getElementById('comments-modal-text');
+    const comments = textarea.value;
+
+    await handleInlineEdit(currentCommentsWorkloadId, 'comments', comments);
+    closeCommentsModal();
+}
+
+// Comments modal event listeners
+document.addEventListener('click', (e) => {
+    if (e.target.id === 'close-comments-modal' || e.target.id === 'cancel-comments-modal') {
+        closeCommentsModal();
+    }
+    if (e.target.id === 'save-comments-modal') {
+        saveComments();
+    }
+    // Close on overlay click
+    if (e.target.id === 'comments-modal') {
+        closeCommentsModal();
+    }
+});
+
+
+// ===== Collapsible Quarter Sections =====
+window.toggleQuarterSection = function (quarter) {
+    const section = document.getElementById(`${quarter}-section`);
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
+};
+
+window.exportToExcel = function (quarter, event) {
+    if (event) event.stopPropagation();
+
+    // Get data for this quarter
+    const quarterData = workloads.filter(w => (quarter === 'Q3' ? (w.quarter === 'Q3' || !w.quarter) : w.quarter === 'Q4'));
+
+    if (quarterData.length === 0) {
+        showAlert('No data', `No workloads found for ${quarter} to export.`);
+        return;
+    }
+
+    // Format data for Excel
+    const data = quarterData.map(w => ({
+        'Forecast': w.forecast_type,
+        'Account': w.account_name,
+        'Rep': w.sales_rep_name,
+        'Country': w.country,
+        'Type': w.customer_type,
+        'Workload': w.workload_type,
+        'Opt-ID': w.opt_id,
+        'Start': w.consumption_start_date,
+        'Month 1': w.month_1_amt,
+        'Month 2': w.month_2_amt,
+        'Month 3': w.month_3_amt,
+        'Total': w.total_amount,
+        'Comments': w.comments
+    }));
+
+    // Create workbook and worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(wb, ws, `${quarter} Workloads`);
+
+    // Save to file
+    XLSX.writeFile(wb, `Sales_Intel_Workloads_${quarter}.xlsx`);
+};
+
+
+// ===== Init =====
+document.addEventListener('DOMContentLoaded', async () => {
+    // Initial load: Load Dashboard by default
+    await loadView('dashboard');
+    await loadClusters(); // This will also trigger data load for the view if needed
+});
+
+
