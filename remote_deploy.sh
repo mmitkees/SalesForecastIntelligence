@@ -118,7 +118,24 @@ fi
 # Ensure pip is up to date
 python3 -m pip install --upgrade pip 2>/dev/null || true
 
-echo "Server dependencies installed successfully!"
+# Open firewall port 8888 for the app
+echo "Configuring firewall to allow port 8888..."
+if command -v firewall-cmd &> /dev/null; then
+    # RHEL/CentOS/Oracle Linux (firewalld)
+    sudo firewall-cmd --permanent --add-port=8888/tcp 2>/dev/null || true
+    sudo firewall-cmd --reload 2>/dev/null || true
+    echo "Firewall port 8888 opened (firewalld)"
+elif command -v ufw &> /dev/null; then
+    # Ubuntu/Debian (ufw)
+    sudo ufw allow 8888/tcp 2>/dev/null || true
+    echo "Firewall port 8888 opened (ufw)"
+elif command -v iptables &> /dev/null; then
+    # Fallback to iptables
+    sudo iptables -A INPUT -p tcp --dport 8888 -j ACCEPT 2>/dev/null || true
+    echo "Firewall port 8888 opened (iptables)"
+fi
+
+echo "Server dependencies and firewall configured successfully!"
 REMOTE_SETUP
 
 echo -e "${GREEN}Remote server dependencies ready.${NC}"
@@ -155,13 +172,20 @@ tar czf "$SCRIPT_DIR/$ARCHIVE_NAME" "${EXCLUDE_PATTERNS[@]}" -C "$SCRIPT_DIR" .
 echo "Uploading archive to server..."
 scp $SSH_OPTS "$SCRIPT_DIR/$ARCHIVE_NAME" "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP:$REMOTE_APP_DIR/"
 
-# Extract on remote server
+# Extract on remote server (clean old code first, preserve db and venv)
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_EXTRACT
 cd $REMOTE_APP_DIR
+
+echo "Cleaning old code files (preserving database, venv, and logs)..."
+# Remove old code but keep database, venv, logs, and archive
+find . -maxdepth 1 -type f ! -name "*.db" ! -name "*.log" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
+rm -rf static templates .agent migrations 2>/dev/null || true
+
+echo "Extracting fresh code..."
 tar xzf $ARCHIVE_NAME
 rm -f $ARCHIVE_NAME
 chmod +x deploy.sh 2>/dev/null || true
-echo "Files extracted successfully!"
+echo "Fresh code deployed successfully!"
 REMOTE_EXTRACT
 
 # Clean up local archive
