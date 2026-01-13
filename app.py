@@ -545,7 +545,10 @@ def update_sales_rep(rep_id):
     
     # --- Step 3: Run Estimation Engine ---
     # Calculated future months based on the new daily rate
-    calculate_future_estimates(rep)
+    # Fetch cluster context for partial data logic
+    cluster = rep.cluster or db.query(Cluster).filter(Cluster.id == rep.cluster_id).first()
+    p_date = cluster.partial_data_date if cluster else None
+    calculate_future_estimates(rep, p_date)
     
     # --- Step 4: Final Workload Aggregation ---
     # This ensures that if Workloads exist, they overwrite manual edits to forecast fields
@@ -766,24 +769,37 @@ def delete_workload(workload_id):
 
 # --- Helpers ---
 
-def calculate_future_estimates(rep):
+def calculate_future_estimates(rep, partial_data_date=None):
     """
     Project future monthly totals based on the Current Daily Rate.
-    Only updates months that are strictly in the future relative to 'today'.
     
     Business Logic:
-    - Future months = Current Daily Rate * Number of days in that month.
-    - Past/Current months = Retain existing values (Actuals).
+    - Reference Date: Use partial_data_date if provided, else date.today().
+    - Future months (Start Date > Reference Date): 
+        - Estimate = Current Daily Rate * Days in Month
+    - Current/Partial Month (Reference Date falls in it):
+        - Remaining Days = Days in Month - Reference Day
+        - Estimate = Existing Actual + (Current Daily Rate * Remaining Days)
+    - Past Months: Retain existing values (Actuals).
     """
     import calendar
-    from datetime import date
+    from datetime import date, datetime
     
     # If no rate is defined, we cannot project
     if not rep.current_daily_rate:
         return
 
-    today = date.today()
-    current_month_idx = today.month 
+    # Determine reference date
+    reference_date = date.today()
+    if partial_data_date:
+        try:
+            # Try parsing various formats if needed, assuming YYYY-MM-DD from frontend/db
+            reference_date = datetime.strptime(str(partial_data_date), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            pass # Fallback to today if invalid format
+
+    current_month_idx = reference_date.month 
+    current_year = reference_date.year
     
     # Map month indices to database column names
     month_map = {
@@ -794,21 +810,52 @@ def calculate_future_estimates(rep):
     for m_idx, field_name in month_map.items():
         # --- Robust Future Determination ---
         # Fiscal Year Context: FY ends May 31.
-        # We determine the calendar year of the month field relative to current FY.
-        target_year = today.year
-        if current_month_idx >= 6: # Currently in Jun-Dec (e.g., 2025)
-            if m_idx < 6: target_year += 1 # Jan-May of next year (2026)
-        else: # Currently in Jan-May (e.g., 2026)
-            if m_idx >= 6: target_year -= 1 # Jun-Dec of previous year (2025)
-            
-        month_date = date(target_year, m_idx, 1)
+        # We determine the calendar year of the month field relative to current reference date logic?
+        # Actually simpler: Just determine the absolute date of this target month relative to reference.
         
-        # If the start of that month is after the current month, calculate projection
-        if month_date > today.replace(day=1):
-             # Logic: Full month projection
-             days_in_month = calendar.monthrange(target_year, m_idx)[1]
+        # Heuristic to align FY months with Calendar Years based on reference date
+        target_year = current_year
+        
+        # FY26 spans Jun 2025 to May 2026.
+        # If reference is Jan 2026. 
+        #   Jan-May -> 2026 (same year)
+        #   Jun-Dec -> 2025 (prev year)
+        # If reference is Oct 2025.
+        #   Jan-May -> 2026 (next year)
+        #   Jun-Dec -> 2025 (same year)
+        
+        if current_month_idx >= 6: # Currently in First Half of FY (e.g. Oct 2025)
+             if m_idx < 6: target_year += 1 # Jan-May are next year
+        else: # Currently in Second Half of FY (e.g. Feb 2026)
+             if m_idx >= 6: target_year -= 1 # Jun-Dec are prev year
+            
+        month_start = date(target_year, m_idx, 1)
+        # End of the target month
+        days_in_month = calendar.monthrange(target_year, m_idx)[1]
+        month_end = date(target_year, m_idx, days_in_month)
+        
+        # Logic 1: Strictly Future Month (Reference Date is before this month started)
+        if reference_date < month_start:
+             # Full Projection
              est = rep.current_daily_rate * days_in_month
              setattr(rep, field_name, est)
+             
+        # Logic 2: Current/Partial Month (Reference Date is inside this month)
+        elif month_start <= reference_date <= month_end:
+             passed_days = reference_date.day
+             remaining_days = days_in_month - passed_days
+             
+             # Current actual value (or 0 if None)
+             current_actual = getattr(rep, field_name) or 0.0
+             
+             # Formula: Current Actual + (Daily Rate * Remaining Days)
+             est = current_actual + (rep.current_daily_rate * remaining_days)
+             setattr(rep, field_name, est)
+             
+             # Also update the specific helper field for current month estimate if it matches
+             # (This is redundant but often requested for UI display)
+             if m_idx == current_month_idx:
+                 rep.current_month_est = est
 
 
 def update_from_workloads(rep, db):
@@ -1022,9 +1069,12 @@ def upload_workloads():
         # --- Step 5: Post-Upload Bulk Synchronization ---
         # Force a calculation update for every rep in the cluster to reflect new deal data
         reps = db.query(SalesRep).filter(SalesRep.cluster_id == int(cluster_id)).all()
+        cluster = db.query(Cluster).filter(Cluster.id == int(cluster_id)).first()
+        p_date = cluster.partial_data_date if cluster else None
+        
         for r in reps:
             update_from_workloads(r, db)
-            calculate_future_estimates(r)
+            calculate_future_estimates(r, p_date)
         db.commit()
         
         return jsonify({"message": f"Successfully processed workloads: {count_added} added, {count_updated} updated."}), 201

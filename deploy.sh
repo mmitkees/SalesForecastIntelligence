@@ -13,17 +13,34 @@ echo -e "${GREEN}=== Sales App Automated Deployment ===${NC}"
 # Helper: Check and Clean Port
 cleanup_port() {
     local p=$1
+    
+    # improved: Stop systemd service first if it exists to prevent auto-restart fighting
+    if command -v systemctl &> /dev/null; then
+        if systemctl is-active --quiet $APP_NAME; then
+            echo -e "${YELLOW}Stopping $APP_NAME systemd service...${NC}"
+            sudo systemctl stop $APP_NAME
+            sleep 2
+        fi
+    fi
+
     echo -e "${YELLOW}Checking availability of port $p...${NC}"
     PID=$(lsof -ti :$p)
     if [ ! -z "$PID" ]; then
         echo -e "${YELLOW}Port $p is in use by PID $PID. Killing it...${NC}"
-        kill -9 $PID 2>/dev/null
+        # Try to kill with current user first, then sudo
+        kill -9 $PID 2>/dev/null || sudo kill -9 $PID 2>/dev/null
         sleep 1
         # Re-check
         PID_RECHECK=$(lsof -ti :$p)
         if [ ! -z "$PID_RECHECK" ]; then
              echo -e "${RED}Error: Failed to free port $p. It might be owned by another user (e.g., root).${NC}"
-             exit 1
+             # Final attempt with sudo and verbose error
+             sudo kill -9 $PID_RECHECK 2>/dev/null || true
+             sleep 1
+             if [ ! -z "$(lsof -ti :$p)" ]; then
+                 echo -e "${RED}Critical Error: Could not kill process on port $p.${NC}"
+                 exit 1
+             fi
         fi
         echo -e "${GREEN}Port $p is now free.${NC}"
     else
@@ -266,6 +283,16 @@ EOF
         # Linux Systemd
         SERVICE_PATH="/etc/systemd/system/$APP_NAME.service"
         USER_NAME=$(whoami)
+        
+        # Handle SELinux (Allow systemd to access /home)
+        if command -v getenforce &> /dev/null; then
+            if [ "$(getenforce)" == "Enforcing" ]; then
+                 echo -e "${YELLOW}SELinux is Enforcing. Setting to Permissive to allow systemd access to home dir...${NC}"
+                 sudo setenforce 0
+                 # Persist for next boot (optional, but good for stability)
+                 # sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
+            fi
+        fi
         
         # Create service file in /tmp first (avoids permission issues)
         TMP_SERVICE="/tmp/${APP_NAME}.service"
