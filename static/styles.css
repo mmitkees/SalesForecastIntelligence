@@ -1,27 +1,45 @@
 /* ===== CSS Variables (Design Tokens) ===== */
 :root {
-    --bg-dark: #0f0f1a;
-    --bg-card: #1a1a2e;
-    --bg-card-hover: #252542;
-    --bg-sidebar: #16162b;
-    --text-primary: #ffffff;
-    --text-secondary: #a0a0b8;
-    --text-muted: #6b6b85;
-    --accent-blue: #4f8cff;
-    --accent-green: #00d68f;
-    --accent-purple: #9b59b6;
-    --accent-orange: #f39c12;
-    --accent-red: #e74c3c;
-    --border-color: #2a2a45;
-    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    --gradient-danger: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
-    --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.3);
-    --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.5);
+    /* Oracle Light Theme (Redwood Inspired) */
+    --bg-dark: #fbfbfb;
+    /* Main Background */
+    --bg-card: #ffffff;
+    /* Card Background */
+    --bg-card-hover: #f4f4f4;
+    --bg-sidebar: #ffffff;
+    /* Navigation/Sidebar */
+
+    --text-primary: #101010;
+    /* Main Text */
+    --text-secondary: #474747;
+    /* Subtext */
+    --text-muted: #757575;
+
+    --accent-blue: #026291;
+    /* Standard Link/Action Blue */
+    --accent-green: #308f5c;
+    /* Success */
+    --accent-purple: #724c85;
+    --accent-orange: #d67616;
+    --accent-red: #c23321;
+    /* Oracle Red */
+
+    --border-color: #e0e0e0;
+
+    /* Gradients - Oracle Red Primary */
+    --gradient-primary: linear-gradient(135deg, #C74634 0%, #a82e1e 100%);
+    --gradient-success: linear-gradient(135deg, #308f5c 0%, #206b42 100%);
+    --gradient-danger: linear-gradient(135deg, #c23321 0%, #9e2315 100%);
+
+    --shadow-card: 0 2px 4px rgba(0, 0, 0, 0.05), 0 4px 12px rgba(0, 0, 0, 0.05);
+    /* Softer shadows */
+    --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.2);
+
     --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --transition: all 0.25s ease;
+    --radius-md: 16px;
+    --radius-lg: 24px;
+
+    --transition: all 0.2s ease;
 }
 
 /* ===== Reset & Base ===== */
@@ -33,12 +51,16 @@
     box-sizing: border-box;
 }
 
+/* Base Background with Curve */
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg-dark);
     color: var(--text-primary);
     min-height: 100vh;
     line-height: 1.6;
+    /* Subtle background pattern/curve */
+    background-image: radial-gradient(circle at 50% 0%, #f3e5f5 0%, var(--bg-dark) 60%);
+    background-attachment: fixed;
 }
 
 /* ===== App Layout ===== */
@@ -53,12 +75,18 @@ body {
     top: 0;
     left: 0;
     right: 0;
-    height: 72px;
-    background: var(--bg-sidebar);
-    border-bottom: 1px solid var(--border-color);
+    height: 80px;
+    background: rgba(255, 255, 255, 0.85);
+    /* Glassmorphism */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
     z-index: 1000;
     display: flex;
     align-items: center;
+    border-bottom-left-radius: 24px;
+    border-bottom-right-radius: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
 }
 
 .top-nav-container {
