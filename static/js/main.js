@@ -184,7 +184,7 @@ document.addEventListener('click', async (e) => {
     }
 
     // Single Deal Add Modal
-    if (target.id === 'add-workload-btn') {
+    if (target.closest('#add-workload-btn')) {
         openModal();
     }
 
