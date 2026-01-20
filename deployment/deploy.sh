@@ -240,6 +240,8 @@ Restart=always
 Environment="DATABASE_URL=$DB_URL"
 Environment="TNS_ADMIN=$WALLET_PATH"
 Environment="PORT=$PORT"
+StandardOutput=append:$WORK_DIR/logs/app.log
+StandardError=append:$WORK_DIR/logs/app.err
 
 [Install]
 WantedBy=multi-user.target
