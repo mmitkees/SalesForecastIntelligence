@@ -254,6 +254,31 @@ else
     echo -e "App running with PID $!"
 fi
 
+# ==============================================================================
+# Install Cron Jobs (Linux only)
+# ==============================================================================
+if [ "$OS_TYPE" == "Linux" ] && [ -f "cronjobs/crontab.txt" ]; then
+    echo -e "\n${YELLOW}Installing Cron Jobs...${NC}"
+    
+    # Ensure logs directory exists for cron output
+    mkdir -p logs
+    
+    # Create temp crontab with APP_DIR substituted
+    APP_DIR="$WORK_DIR"
+    sed "s|\$APP_DIR|$APP_DIR|g" cronjobs/crontab.txt > /tmp/sales_app_crontab.tmp
+    
+    # Make all scripts in cronjobs executable
+    chmod +x cronjobs/*.sh 2>/dev/null || true
+    
+    # Install crontab (preserves existing non-sales-app cron jobs)
+    # Get existing crontab, remove old sales-app entries, add new ones
+    (crontab -l 2>/dev/null | grep -v "$APP_DIR/cronjobs" || true; cat /tmp/sales_app_crontab.tmp | grep -v "^#" | grep -v "^$") | crontab -
+    
+    rm -f /tmp/sales_app_crontab.tmp
+    echo -e "${GREEN}Cron jobs installed successfully.${NC}"
+    echo -e "View with: crontab -l"
+fi
+
 # Get LAN IP
 LAN_IP=""
 if [ "$(uname)" == "Darwin" ]; then

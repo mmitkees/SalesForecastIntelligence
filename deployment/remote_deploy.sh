@@ -178,10 +178,10 @@ scp $SSH_OPTS "$SCRIPT_DIR/$ARCHIVE_NAME" "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_EXTRACT
 cd $REMOTE_APP_DIR
 
-echo "Cleaning old code files (preserving database, venv, and logs)..."
-# Remove old code but keep database, venv, logs, and archive
+echo "Cleaning old code files (preserving database, venv, logs, and backups)..."
+# Remove old code but keep database, venv, logs, backups, and archive
 find . -maxdepth 1 -type f ! -name "*.db" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
-rm -rf static templates .agent migrations backend deployment 2>/dev/null || true
+rm -rf static templates .agent migrations backend deployment cronjobs 2>/dev/null || true
 
 echo "Extracting fresh code..."
 tar xzf $ARCHIVE_NAME

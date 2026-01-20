@@ -1,0 +1,11 @@
+# ==============================================================================
+# Crontab Configuration for Sales App
+# 
+# This file defines all cron jobs for the application.
+# Jobs are automatically installed by deploy.sh on each deployment.
+#
+# Format: minute hour day month weekday command
+# ==============================================================================
+
+# Daily database backup at 2:00 AM
+0 2 * * * $APP_DIR/cronjobs/backup_db.sh >> $APP_DIR/logs/cron.log 2>&1
