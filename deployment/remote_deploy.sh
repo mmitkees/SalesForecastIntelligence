@@ -103,18 +103,34 @@ else
 fi
 
 # ==============================================================================
-# Step 4: Pre-Deployment Backup on Remote Server
+# Step 4: Pre-Deployment Full Backup on Remote Server
 # ==============================================================================
 echo -e "\n${YELLOW}[4/6] Running pre-deployment backup...${NC}"
 
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << 'REMOTE_BACKUP'
-if [ -f "$HOME/sales-app/cronjobs/backup_db.sh" ]; then
-    echo "Running backup script..."
-    cd $HOME/sales-app
-    bash cronjobs/backup_db.sh
-    echo "Backup completed!"
+APP_DIR="$HOME/sales-app"
+BACKUP_DIR="$HOME/sales-app-backups"
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+BACKUP_FILE="$BACKUP_DIR/sales-app-backup_$TIMESTAMP.tar.gz"
+
+if [ -d "$APP_DIR" ]; then
+    echo "Creating full backup of $APP_DIR..."
+    mkdir -p "$BACKUP_DIR"
+    
+    # Create tarball excluding venv and .git
+    tar -czf "$BACKUP_FILE" \
+        --exclude="$APP_DIR/venv" \
+        --exclude="$APP_DIR/.venv" \
+        --exclude="$APP_DIR/.git" \
+        -C "$HOME" sales-app
+    
+    echo "Backup created: $BACKUP_FILE"
+    
+    # Cleanup: Keep only last 5 backups
+    ls -t "$BACKUP_DIR"/sales-app-backup_*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
+    echo "Cleanup complete. Keeping last 5 backups."
 else
-    echo "No existing backup script found (first deployment?). Skipping..."
+    echo "No existing app directory found. Skipping backup..."
 fi
 REMOTE_BACKUP
 
