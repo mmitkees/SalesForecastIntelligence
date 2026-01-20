@@ -19,8 +19,10 @@ env/
 # OS
 .DS_Store
 
-# Logs
+# Logs and Data
 logs/
+dbbackups/
+generated reports/
 
 # Note: .env is NOT ignored - it's needed for deployment configuration
 # Sensitive credentials should use .env.local which IS ignored
