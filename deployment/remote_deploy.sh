@@ -103,9 +103,27 @@ else
 fi
 
 # ==============================================================================
-# Step 4: Git Clone or Pull on Remote Server
+# Step 4: Pre-Deployment Backup on Remote Server
 # ==============================================================================
-echo -e "\n${YELLOW}[4/5] Syncing code via Git...${NC}"
+echo -e "\n${YELLOW}[4/6] Running pre-deployment backup...${NC}"
+
+ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << 'REMOTE_BACKUP'
+if [ -f "$HOME/sales-app/cronjobs/backup_db.sh" ]; then
+    echo "Running backup script..."
+    cd $HOME/sales-app
+    bash cronjobs/backup_db.sh
+    echo "Backup completed!"
+else
+    echo "No existing backup script found (first deployment?). Skipping..."
+fi
+REMOTE_BACKUP
+
+echo -e "${GREEN}Pre-deployment backup done.${NC}"
+
+# ==============================================================================
+# Step 5: Git Clone or Pull on Remote Server
+# ==============================================================================
+echo -e "\n${YELLOW}[5/6] Syncing code via Git...${NC}"
 
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_GIT
 set -e
@@ -158,9 +176,9 @@ REMOTE_GIT
 echo -e "${GREEN}Code synced via Git!${NC}"
 
 # ==============================================================================
-# Step 5: Execute deploy.sh on Remote Server
+# Step 6: Execute deploy.sh on Remote Server
 # ==============================================================================
-echo -e "\n${YELLOW}[5/5] Executing deployment on remote server...${NC}"
+echo -e "\n${YELLOW}[6/6] Executing deployment on remote server...${NC}"
 echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Native/SQLite).${NC}"
 echo ""
 
