@@ -255,9 +255,9 @@ else
 fi
 
 # ==============================================================================
-# Install Cron Jobs (Linux only)
+# Install Cron Jobs (Linux only, when INSTALL_CRON=true)
 # ==============================================================================
-if [ "$OS_TYPE" == "Linux" ] && [ -f "cronjobs/crontab.txt" ]; then
+if [ "$OS_TYPE" == "Linux" ] && [ "$INSTALL_CRON" == "true" ] && [ -f "cronjobs/crontab.txt" ]; then
     echo -e "\n${YELLOW}Installing Cron Jobs...${NC}"
     
     # Ensure logs directory exists for cron output
