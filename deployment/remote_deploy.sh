@@ -162,6 +162,7 @@ EXCLUDE_PATTERNS=(
     "--exclude=.venv"
     "--exclude=node_modules"
     "--exclude=logs"
+    "--exclude=dbbackups"
     # "--exclude=*.db"  <-- Allow DB Upload
     "--exclude=.DS_Store"
     "--exclude=serverkeys"
