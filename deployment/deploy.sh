@@ -16,11 +16,12 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 echo -e "${GREEN}=== Sales App Automated Deployment ===${NC}"
+
 # Helper: Check and Clean Port
 cleanup_port() {
     local p=$1
     
-    # improved: Stop systemd service first if it exists to prevent auto-restart fighting
+    # Stop systemd service first if it exists to prevent auto-restart fighting
     if command -v systemctl &> /dev/null; then
         if systemctl is-active --quiet $APP_NAME; then
             echo -e "${YELLOW}Stopping $APP_NAME systemd service...${NC}"
@@ -33,14 +34,11 @@ cleanup_port() {
     PID=$(lsof -ti :$p)
     if [ ! -z "$PID" ]; then
         echo -e "${YELLOW}Port $p is in use by PID $PID. Killing it...${NC}"
-        # Try to kill with current user first, then sudo
         kill -9 $PID 2>/dev/null || sudo kill -9 $PID 2>/dev/null
         sleep 1
-        # Re-check
         PID_RECHECK=$(lsof -ti :$p)
         if [ ! -z "$PID_RECHECK" ]; then
              echo -e "${RED}Error: Failed to free port $p. It might be owned by another user (e.g., root).${NC}"
-             # Final attempt with sudo and verbose error
              sudo kill -9 $PID_RECHECK 2>/dev/null || true
              sleep 1
              if [ ! -z "$(lsof -ti :$p)" ]; then
@@ -53,6 +51,7 @@ cleanup_port() {
         echo -e "${GREEN}Port $p is free.${NC}"
     fi
 }
+
 # Helper: Check and Install Dependency
 check_install() {
     local cmd=$1
@@ -69,38 +68,24 @@ check_install() {
         if [ "$INSTALL_CHOICE" == "y" ]; then
             echo -e "Attempting to install $name..."
             
-            # Detect OS
             if [ "$(uname)" == "Darwin" ]; then
-                # macOS
                 if ! command -v brew &> /dev/null; then
                     echo -e "${RED}Error: Homebrew not found. Please install Homebrew first.${NC}"
                     return 1
                 fi
-                
-                if [ "$cmd" == "docker" ]; then
-                    brew install --cask docker
-                else
-                    brew install $name
-                fi
-                
+                brew install $name
             elif [ -f /etc/debian_version ]; then
-                # Debian/Ubuntu
                 sudo apt-get update
                 sudo apt-get install -y $name
             elif [ -f /etc/redhat-release ]; then
-                # RHEL/CentOS
                 sudo yum install -y $name
             else
                 echo -e "${RED}Unsupported OS for auto-install. Please install $name manually.${NC}"
                 return 1
             fi
             
-            # Re-check
             if command -v $cmd &> /dev/null; then
                  echo -e "${GREEN}$name installed successfully!${NC}"
-                 if [ "$cmd" == "docker" ]; then
-                    echo -e "${YELLOW}Note: You may need to start Docker Desktop manually on macOS.${NC}"
-                 fi
             else
                  echo -e "${RED}Failed to install $name.${NC}"
             fi
@@ -111,39 +96,12 @@ check_install() {
 }
 
 # 1. Validation Checks
-echo -e "\n${YELLOW}[1/5] Validating Environment...${NC}"
+echo -e "\n${YELLOW}[1/4] Validating Environment...${NC}"
 
 check_install python3 python3
 
-# Docker check moved to after selection
-
-# 2. Deployment Mode Selection
-echo -e "\n${YELLOW}[2/5] Choose Deployment Mode:${NC}"
-if [ -z "$DEPLOY_MODE" ]; then
-    echo "1) Docker Container (Recommended)"
-    echo "2) Native Background Service (Systemd/Launchd)"
-    read -p "Enter choice (1/2): " DEPLOY_MODE
-else
-    echo "Auto-selected Mode: $DEPLOY_MODE"
-fi
-
-# Check Docker if Mode 1 selected
-if [ "$DEPLOY_MODE" == "1" ]; then
-    check_install docker docker
-    if ! command -v docker &> /dev/null; then
-        echo -e "${RED}Error: Docker is required for this mode but is not installed.${NC}"
-        echo -e "Falling back to Native deployment selection..."
-        DEPLOY_MODE="2"
-        # Or exit 1? User asked to ask to install. My check_install does ask.
-        exit 1
-    else
-        HAS_DOCKER=true
-    fi
-fi
-
-
-# 3. Database Configuration
-echo -e "\n${YELLOW}[3/5] Configure Database:${NC}"
+# 2. Database Configuration
+echo -e "\n${YELLOW}[2/4] Configure Database:${NC}"
 if [ -z "$DB_CHOICE" ]; then
     echo "1) Local SQLite (Persistent)"
     echo "2) Oracle Autonomous Database"
@@ -177,7 +135,7 @@ else
     WALLET_PATH=""
 fi
 
-# Write .env file for Native mode (Docker uses -e flags or env file)
+# Write .env file
 echo "DATABASE_URL=$DB_URL" > .env
 if [ "$IS_ORACLE" = true ]; then
     echo "TNS_ADMIN=$WALLET_PATH" >> .env
@@ -185,88 +143,23 @@ fi
 echo "PORT=$PORT" >> .env
 
 
-# 4. Execution Logic
+# 3. Port Cleanup
 cleanup_port $PORT
 
-if [ "$DEPLOY_MODE" == "1" ]; then
-    # --- DOCKER DEPLOYMENT ---
-    if [ "$HAS_DOCKER" = false ]; then
-        echo -e "${RED}Error: Docker not found. Cannot proceed with container deployment.${NC}"
-        exit 1
-    fi
+# 4. Native Service Deployment
+echo -e "\n${GREEN}[3/4] Installing Python Dependencies...${NC}"
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-    echo -e "\n${GREEN}[4/5] Building Docker Image...${NC}"
-    docker build -t $APP_NAME .
+echo -e "\n${GREEN}[4/4] Creating System Service...${NC}"
 
-    echo -e "${GREEN}[5/5] Running Container...${NC}"
+OS_TYPE=$(uname)
+if [ "$OS_TYPE" == "Darwin" ]; then
+    # macOS LaunchAgent
+    PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
     
-    # Stop existing App
-    docker stop $APP_NAME 2>/dev/null || true
-    docker rm $APP_NAME 2>/dev/null || true
-
-    if [ "$IS_ORACLE" = true ]; then
-        docker run -d \
-          --name $APP_NAME \
-          --restart unless-stopped \
-          -p $PORT:$PORT \
-          -v "$WALLET_PATH":/app/wallet \
-          -e TNS_ADMIN=/app/wallet \
-          -e DATABASE_URL="$DB_URL" \
-          $APP_NAME
-    else
-        docker run -d \
-          --name $APP_NAME \
-          --restart unless-stopped \
-          -p $PORT:$PORT \
-          -v "$WORK_DIR/sales_app_v3.db":/app/sales_app_v3.db \
-          $APP_NAME
-    fi
-    
-    # --- PORTAINER DEPLOYMENT (Auto) ---
-    echo -e "\n${YELLOW}Deploying Portainer (Management UI)...${NC}"
-    
-    docker stop portainer 2>/dev/null || true
-    docker rm portainer 2>/dev/null || true
-    
-    # Create data volume if not exists
-    docker volume create portainer_data
-    
-    docker run -d \
-      -p 9000:9000 \
-      --name portainer \
-      --restart=always \
-      -v /var/run/docker.sock:/var/run/docker.sock \
-      -v portainer_data:/data \
-      docker.io/portainer/portainer-ce:latest
-      
-    HAS_PORTAINER=true
-    echo -e "${GREEN}Portainer deployed successfully.${NC}"
-
-    echo -e "${GREEN}Deployment Complete! App running on port $PORT.${NC}"
-
-else
-    # --- NATIVE SERVICE DEPLOYMENT ---
-    
-    # Ensure Docker container is stopped to free port
-    if command -v docker &> /dev/null; then
-        echo -e "${YELLOW}Stopping any existing Docker container...${NC}"
-        docker stop $APP_NAME 2>/dev/null || true
-        docker rm $APP_NAME 2>/dev/null || true
-    fi
-
-    echo -e "\n${GREEN}[4/5] Installing Python Dependencies...${NC}"
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-
-    echo -e "\n${GREEN}[5/5] Creating System Service...${NC}"
-    
-    OS_TYPE=$(uname)
-    if [ "$OS_TYPE" == "Darwin" ]; then
-        # macOS LaunchAgent
-        PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
-        
-        cat <<EOF > "$PLIST_PATH"
+    cat <<EOF > "$PLIST_PATH"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -300,29 +193,27 @@ else
 </dict>
 </plist>
 EOF
-        echo -e "Created macOS service at $PLIST_PATH"
-        launchctl unload "$PLIST_PATH" 2>/dev/null
-        launchctl load "$PLIST_PATH"
-        echo -e "${GREEN}Service started via launchctl.${NC}"
+    echo -e "Created macOS service at $PLIST_PATH"
+    launchctl unload "$PLIST_PATH" 2>/dev/null
+    launchctl load "$PLIST_PATH"
+    echo -e "${GREEN}Service started via launchctl.${NC}"
 
-    elif [ "$OS_TYPE" == "Linux" ]; then
-        # Linux Systemd
-        SERVICE_PATH="/etc/systemd/system/$APP_NAME.service"
-        USER_NAME=$(whoami)
-        
-        # Handle SELinux (Allow systemd to access /home)
-        if command -v getenforce &> /dev/null; then
-            if [ "$(getenforce)" == "Enforcing" ]; then
-                 echo -e "${YELLOW}SELinux is Enforcing. Setting to Permissive to allow systemd access to home dir...${NC}"
-                 sudo setenforce 0
-                 # Persist for next boot (optional, but good for stability)
-                 # sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config
-            fi
+elif [ "$OS_TYPE" == "Linux" ]; then
+    # Linux Systemd
+    SERVICE_PATH="/etc/systemd/system/$APP_NAME.service"
+    USER_NAME=$(whoami)
+    
+    # Handle SELinux (Allow systemd to access /home)
+    if command -v getenforce &> /dev/null; then
+        if [ "$(getenforce)" == "Enforcing" ]; then
+             echo -e "${YELLOW}SELinux is Enforcing. Setting to Permissive to allow systemd access to home dir...${NC}"
+             sudo setenforce 0
         fi
-        
-        # Create service file in /tmp first (avoids permission issues)
-        TMP_SERVICE="/tmp/${APP_NAME}.service"
-        cat <<EOF > "$TMP_SERVICE"
+    fi
+    
+    # Create service file in /tmp first (avoids permission issues)
+    TMP_SERVICE="/tmp/${APP_NAME}.service"
+    cat <<EOF > "$TMP_SERVICE"
 [Unit]
 Description=Sales App Service
 After=network.target
@@ -339,29 +230,28 @@ Environment="PORT=$PORT"
 [Install]
 WantedBy=multi-user.target
 EOF
-        
-        echo -e "${YELLOW}Requesting sudo permissions to install systemd service...${NC}"
-        
-        # Move service file and set up systemd
-        if sudo cp "$TMP_SERVICE" "$SERVICE_PATH"; then
-            sudo chmod 644 "$SERVICE_PATH"
-            sudo systemctl daemon-reload
-            sudo systemctl enable $APP_NAME 2>/dev/null || true
-            sudo systemctl restart $APP_NAME
-            rm -f "$TMP_SERVICE"
-            echo -e "${GREEN}Systemd service installed and started.${NC}"
-        else
-            echo -e "${RED}Failed to install systemd service. Running manually...${NC}"
-            rm -f "$TMP_SERVICE"
-            nohup $WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py > $WORK_DIR/app.log 2>&1 &
-            echo -e "${GREEN}App running manually with PID $!${NC}"
-        fi
-        
+    
+    echo -e "${YELLOW}Requesting sudo permissions to install systemd service...${NC}"
+    
+    # Move service file and set up systemd
+    if sudo cp "$TMP_SERVICE" "$SERVICE_PATH"; then
+        sudo chmod 644 "$SERVICE_PATH"
+        sudo systemctl daemon-reload
+        sudo systemctl enable $APP_NAME 2>/dev/null || true
+        sudo systemctl restart $APP_NAME
+        rm -f "$TMP_SERVICE"
+        echo -e "${GREEN}Systemd service installed and started.${NC}"
     else
-        echo -e "${RED}Unsupported OS for auto-service creation. Running manually in background.${NC}"
-        nohup python backend/app.py > app.log 2>&1 &
-        echo -e "App running with PID $!"
+        echo -e "${RED}Failed to install systemd service. Running manually...${NC}"
+        rm -f "$TMP_SERVICE"
+        nohup $WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py > $WORK_DIR/app.log 2>&1 &
+        echo -e "${GREEN}App running manually with PID $!${NC}"
     fi
+    
+else
+    echo -e "${RED}Unsupported OS for auto-service creation. Running manually in background.${NC}"
+    nohup python backend/app.py > app.log 2>&1 &
+    echo -e "App running with PID $!"
 fi
 
 # Get LAN IP
@@ -376,12 +266,4 @@ echo -e "\n${GREEN}Deployment finished successfully!${NC}"
 echo -e "Access Locally: http://localhost:$PORT"
 if [ ! -z "$LAN_IP" ]; then
     echo -e "Access via Network: http://$LAN_IP:$PORT"
-fi
-
-if [ "$HAS_PORTAINER" = true ]; then
-    echo -e "\n${YELLOW}Portainer Management:${NC}"
-    echo -e "Access Locally: http://localhost:9000"
-    if [ ! -z "$LAN_IP" ]; then
-        echo -e "Access via Network: http://$LAN_IP:9000"
-    fi
 fi

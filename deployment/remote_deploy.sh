@@ -199,11 +199,11 @@ echo -e "${GREEN}Project files uploaded successfully!${NC}"
 # Step 6: Execute deploy.sh on Remote Server
 # ==============================================================================
 echo -e "\n${YELLOW}[6/6] Executing deployment on remote server...${NC}"
-echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Docker/SQLite).${NC}"
+echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Native/SQLite).${NC}"
 echo ""
 
 # Run deploy.sh with environment variables for auto-selection
-ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DEPLOY_MODE=2 DB_CHOICE=1 AUTO_INSTALL=true && bash deployment/deploy.sh"
+ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DB_CHOICE=1 AUTO_INSTALL=true && bash deployment/deploy.sh"
 
 # ==============================================================================
 # Deployment Complete

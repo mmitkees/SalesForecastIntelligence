@@ -33,16 +33,15 @@ This application is a Sales Consumption Intelligence Dashboard built with Python
 ```
 
 ## Automated Deployment (Recommended)
-You can use the `deploy.sh` script to automate set up, validation, and running the application (Docker or Native Service).
+You can use the `deployment/deploy.sh` script to automate set up, validation, and running the application as a native system service.
 
 ```bash
-./deploy.sh
+./deployment/deploy.sh
 ```
 
 Follow the interactive prompts to:
-1.  Choose Deployment Mode (**Docker Container** or **Native Service**).
-2.  Select Database (**Local SQLite** or **Oracle ADB**).
-3.  Automatically build images or configure system services (`systemd` for Linux, `launchd` for macOS).
+1.  Select Database (**Local SQLite** or **Oracle ADB**).
+2.  Automatically configure system services (`systemd` for Linux, `launchd` for macOS).
 
 ---
 
