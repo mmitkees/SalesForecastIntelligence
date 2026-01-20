@@ -21,9 +21,10 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Script directory
+# Script directory and Project Root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║         Sales App - Remote Deployment Script                 ║${NC}"
@@ -36,7 +37,7 @@ echo -e "\n${YELLOW}[1/6] Loading configuration from .env...${NC}"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${RED}Error: .env file not found at $ENV_FILE${NC}"
-    echo -e "${YELLOW}Please create .env file with the following variables:${NC}"
+    echo -e "${YELLOW}Please create .env file in project root with the following variables:${NC}"
     echo -e "  REMOTE_SERVER_IP=129.151.159.172"
     echo -e "  REMOTE_SERVER_USER=opc"
     echo -e "  SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key"
@@ -55,7 +56,7 @@ REMOTE_APP_DIR="${REMOTE_APP_DIR:-/home/opc/sales-app}"
 
 # Resolve SSH key path (relative to script directory)
 if [[ ! "$SSH_KEY_PATH" = /* ]]; then
-    SSH_KEY_PATH="$SCRIPT_DIR/$SSH_KEY_PATH"
+    SSH_KEY_PATH="$PROJECT_ROOT/$SSH_KEY_PATH"
 fi
 
 echo -e "  Server IP:    ${GREEN}$REMOTE_SERVER_IP${NC}"
@@ -167,7 +168,8 @@ EXCLUDE_PATTERNS=(
     "--exclude=$ARCHIVE_NAME"
 )
 
-tar czf "$SCRIPT_DIR/$ARCHIVE_NAME" "${EXCLUDE_PATTERNS[@]}" -C "$SCRIPT_DIR" .
+# Create archive from Project Root
+tar czf "$SCRIPT_DIR/$ARCHIVE_NAME" "${EXCLUDE_PATTERNS[@]}" -C "$PROJECT_ROOT" .
 
 echo "Uploading archive to server..."
 scp $SSH_OPTS "$SCRIPT_DIR/$ARCHIVE_NAME" "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP:$REMOTE_APP_DIR/"
@@ -179,12 +181,12 @@ cd $REMOTE_APP_DIR
 echo "Cleaning old code files (preserving database, venv, and logs)..."
 # Remove old code but keep database, venv, logs, and archive
 find . -maxdepth 1 -type f ! -name "*.db" ! -name "*.log" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
-rm -rf static templates .agent migrations backend 2>/dev/null || true
+rm -rf static templates .agent migrations backend deployment 2>/dev/null || true
 
 echo "Extracting fresh code..."
 tar xzf $ARCHIVE_NAME
 rm -f $ARCHIVE_NAME
-chmod +x deploy.sh 2>/dev/null || true
+chmod +x deployment/deploy.sh 2>/dev/null || true
 echo "Fresh code deployed successfully!"
 REMOTE_EXTRACT
 
@@ -201,7 +203,7 @@ echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Docker/SQLite
 echo ""
 
 # Run deploy.sh with environment variables for auto-selection
-ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DEPLOY_MODE=2 DB_CHOICE=1 AUTO_INSTALL=true && bash deploy.sh"
+ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DEPLOY_MODE=2 DB_CHOICE=1 AUTO_INSTALL=true && bash deployment/deploy.sh"
 
 # ==============================================================================
 # Deployment Complete

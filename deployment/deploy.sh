@@ -2,6 +2,12 @@
 APP_NAME="sales-app"
 PORT=8888
 SERVICE_NAME="com.salesapp.service"
+
+# Ensure we run from the project root
+if [ -d "$(dirname "${BASH_SOURCE[0]}")/.." ]; then
+    cd "$(dirname "${BASH_SOURCE[0]}")/.."
+fi
+
 WORK_DIR=$(pwd)
 ENV_FILE=".env"
 # Colors
