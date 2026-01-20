@@ -240,6 +240,14 @@ if [ "$DEPLOY_MODE" == "1" ]; then
 
 else
     # --- NATIVE SERVICE DEPLOYMENT ---
+    
+    # Ensure Docker container is stopped to free port
+    if command -v docker &> /dev/null; then
+        echo -e "${YELLOW}Stopping any existing Docker container...${NC}"
+        docker stop $APP_NAME 2>/dev/null || true
+        docker rm $APP_NAME 2>/dev/null || true
+    fi
+
     echo -e "\n${GREEN}[4/5] Installing Python Dependencies...${NC}"
     python3 -m venv venv
     source venv/bin/activate

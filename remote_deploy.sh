@@ -201,7 +201,7 @@ echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Docker/SQLite
 echo ""
 
 # Run deploy.sh with environment variables for auto-selection
-ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DEPLOY_MODE=1 DB_CHOICE=1 AUTO_INSTALL=true && bash deploy.sh"
+ssh -t $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "cd $REMOTE_APP_DIR && export DEPLOY_MODE=2 DB_CHOICE=1 AUTO_INSTALL=true && bash deploy.sh"
 
 # ==============================================================================
 # Deployment Complete
