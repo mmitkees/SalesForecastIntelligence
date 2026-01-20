@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sales Consumption Intelligence</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <title>Consumption Forecast 360 - CF360</title>
     <link rel="stylesheet" href="styles.css?v=2.2">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Flatpickr Date Picker -->
@@ -18,38 +19,47 @@
 <body>
     <header class="top-nav">
         <div class="top-nav-container">
-            <div class="logo">
-                <div class="logo-icon">📊</div>
-                <h1>Sales Intel</h1>
-            </div>
-            <nav class="nav-menu">
-                <button class="nav-item active" data-view="dashboard">
-                    <span class="nav-icon">📈</span>
-                    Dashboard
-                </button>
-                <button class="nav-item" data-view="workloads">
-                    <span class="nav-icon">📋</span>
-                    Workloads
-                </button>
-                <button class="nav-item" data-view="analytics">
-                    <span class="nav-icon">📊</span>
-                    Analytics
-                </button>
-                <button class="nav-item" data-view="admin">
-                    <span class="nav-icon">⚙️</span>
-                    Admin
-                </button>
-            </nav>
-            <div class="top-nav-controls">
-                <div class="cluster-selector-top">
-                    <select id="fiscal-year-select" style="margin-right: 10px;">
-                        <option value="">FY...</option>
-                    </select>
-                    <select id="cluster-select">
-                        <option value="">Loading...</option>
-                    </select>
+            <!-- Top Row: Logo and User Info -->
+            <div class="header-top-row">
+                <div class="logo">
+                    <div class="logo-icon">📊</div>
+                    <h1>Consumption Forecast 360 - CF360</h1>
                 </div>
+                <div id="user-info" class="user-info">
+                    <!-- Will be populated by JS -->
+                </div>
+            </div>
 
+            <!-- Bottom Row: Navigation and Dropdowns -->
+            <div class="header-bottom-row">
+                <nav class="nav-menu">
+                    <button class="nav-item active" data-view="dashboard">
+                        <span class="nav-icon">📈</span>
+                        Dashboard
+                    </button>
+                    <button class="nav-item" data-view="workloads">
+                        <span class="nav-icon">📋</span>
+                        Workloads
+                    </button>
+                    <button class="nav-item" data-view="analytics">
+                        <span class="nav-icon">📊</span>
+                        Analytics
+                    </button>
+                    <button class="nav-item" data-view="admin">
+                        <span class="nav-icon">⚙️</span>
+                        Admin
+                    </button>
+                </nav>
+                <div class="top-nav-controls">
+                    <div class="cluster-selector-top">
+                        <select id="fiscal-year-select" style="margin-right: 10px;">
+                            <option value="">FY...</option>
+                        </select>
+                        <select id="cluster-select">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </div>
     </header>
@@ -207,7 +217,7 @@
         </div>
     </div>
 
-    <script type="module" src="js/main.js"></script>
+    <script type="module" src="js/main.js?v=2.4"></script>
 </body>
 
 </html>

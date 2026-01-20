@@ -250,7 +250,7 @@ else
     <key>ProgramArguments</key>
     <array>
         <string>$WORK_DIR/venv/bin/python</string>
-        <string>$WORK_DIR/app.py</string>
+        <string>$WORK_DIR/backend/app.py</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$WORK_DIR</string>
@@ -304,7 +304,7 @@ After=network.target
 [Service]
 User=$USER_NAME
 WorkingDirectory=$WORK_DIR
-ExecStart=$WORK_DIR/venv/bin/python $WORK_DIR/app.py
+ExecStart=$WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py
 Restart=always
 Environment="DATABASE_URL=$DB_URL"
 Environment="TNS_ADMIN=$WALLET_PATH"
@@ -327,13 +327,13 @@ EOF
         else
             echo -e "${RED}Failed to install systemd service. Running manually...${NC}"
             rm -f "$TMP_SERVICE"
-            nohup $WORK_DIR/venv/bin/python $WORK_DIR/app.py > $WORK_DIR/app.log 2>&1 &
+            nohup $WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py > $WORK_DIR/app.log 2>&1 &
             echo -e "${GREEN}App running manually with PID $!${NC}"
         fi
         
     else
         echo -e "${RED}Unsupported OS for auto-service creation. Running manually in background.${NC}"
-        nohup python app.py > app.log 2>&1 &
+        nohup python backend/app.py > app.log 2>&1 &
         echo -e "App running with PID $!"
     fi
 fi

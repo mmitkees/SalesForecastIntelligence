@@ -94,18 +94,16 @@ export async function updateWorkload(id, data) {
  * Deletes a workload record.
  * @param {number} id - Workload ID.
  */
+/**
+ * Deletes a workload record.
+ * @param {number} id - Workload ID.
+ */
 export async function deleteWorkload(id) {
-    await fetch(`/api/workloads/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/workloads/${id}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error("Failed to delete workload");
 }
 
-/**
- * Triggers the database seeding process (Admin only).
- * @returns {Promise<Object>} Seeding results.
- */
-export async function seedDatabase() {
-    const response = await fetch('/api/seed', { method: 'POST' });
-    return response.json();
-}
+
 
 /**
  * Creates a new cluster.
@@ -126,7 +124,8 @@ export async function createCluster(name) {
  * @param {number} id - Cluster ID.
  */
 export async function deleteCluster(id) {
-    await fetch(`/api/clusters/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/clusters/${id}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error("Failed to delete cluster");
 }
 
 /**
@@ -148,7 +147,8 @@ export async function createSalesRep(data) {
  * @param {number} id - Rep ID.
  */
 export async function deleteSalesRep(id) {
-    await fetch(`/api/sales_reps/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/sales_reps/${id}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error("Failed to delete sales rep");
 }
 
 /**
@@ -157,6 +157,89 @@ export async function deleteSalesRep(id) {
  */
 export async function fetchAllSalesReps() {
     const response = await fetch(`/api/sales_reps?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+// --- Authentication API ---
+
+/**
+ * Authenticates a user with username and password.
+ * @param {string} username - User's username.
+ * @param {string} password - User's password.
+ * @returns {Promise<Object>} User data on success.
+ */
+export async function login(username, password) {
+    const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Login failed');
+    return data;
+}
+
+/**
+ * Logs out the current user.
+ */
+export async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+}
+
+/**
+ * Gets the currently logged-in user's info.
+ * @returns {Promise<Object|null>} User data or null if not authenticated.
+ */
+export async function getCurrentUser() {
+    const response = await fetch(`/api/auth/me?t=${Date.now()}`);
+    if (!response.ok) return null;
+    return response.json();
+}
+
+// --- Region API ---
+
+/**
+ * Fetches all regions.
+ * @returns {Promise<Array>} List of regions.
+ */
+export async function fetchRegions() {
+    const response = await fetch(`/api/regions?t=${Date.now()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+}
+
+/**
+ * Creates a new region.
+ * @param {string} name - Region name.
+ * @returns {Promise<Object>} Created region.
+ */
+export async function createRegion(name) {
+    const response = await fetch('/api/regions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    return response.json();
+}
+
+
+/**
+ * Deletes a region.
+ * @param {number} id - Region ID.
+ */
+export async function deleteRegion(id) {
+    const response = await fetch(`/api/regions/${id}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error("Failed to delete region");
+}
+
+/**
+ * Fetches analytics data for a specific region.
+ * @param {string|number} regionId - Region ID or 'all'.
+ * @returns {Promise<Object>} Analytics data.
+ */
+export async function fetchRegionAnalytics(regionId) {
+    const response = await fetch(`/api/analytics/regions?region_id=${regionId}&t=${Date.now()}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
 }

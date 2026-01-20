@@ -1,94 +1,122 @@
-/**
- * Analytics Controller.
- * Manages the "Quarterly History" view, providing a comprehensive overview 
- * of exit numbers and growth percentages across all quarters.
- */
+import { fetchRegions, fetchRegionAnalytics } from '../api.js';
+import { formatCurrency, showAlert } from '../utils.js';
 import { state } from '../state.js';
-import { fetchDashboard } from '../api.js';
-import { formatCurrency, formatPercent, getPercentColorClass } from '../utils.js';
 
-/**
- * Loads analytics data for the current cluster.
- * Leverages the dashboard API for aggregated history metrics.
- */
+let cachedRegions = null;
+
 export async function loadAnalyticsData() {
-    // Only proceed if the history table is present in the DOM
-    if (!document.getElementById('quarterly-history-table')) return;
-
-    if (!state.currentClusterId) return;
+    const container = document.getElementById('analytics-table-body');
+    if (!container) return; // Not on analytics view
 
     try {
-        // Reuse fetchDashboard as it provides the full SalesRep list with history
-        const dashboardData = await fetchDashboard(state.currentClusterId);
-        renderQuarterlyHistory(dashboardData);
+        // 1. Always populate Dropdown (using cache if available)
+        await populateRegionDropdown();
+
+        // 2. Get Selected Region
+        const select = document.getElementById('analytics-region-select');
+        const regionId = select ? select.value : 'all';
+
+        // 3. Fetch Data
+        container.innerHTML = '<tr><td colspan="7" class="loading">Loading data...</td></tr>';
+
+        const data = await fetchRegionAnalytics(regionId) || { aggregates: null, clusters: [] };
+
+        // 4. Render Data
+        renderScorecards(data.aggregates);
+        renderBreakdownTable(data.clusters);
+
     } catch (e) {
-        console.error("Failed to load analytics data", e);
+        console.error("Failed to load analytics", e);
+        if (container) {
+            container.innerHTML = `<tr><td colspan="7" class="error">Error loading data: ${e.message}</td></tr>`;
+        }
+        await showAlert('Error', 'Failed to load analytics data');
     }
 }
 
-/**
- * Renders the full history table with rep-by-rep metrics and cluster totals.
- * @param {Object} data - Processed dashboard data from the backend.
- */
-function renderQuarterlyHistory(data) {
-    const tbody = document.getElementById('quarterly-history-tbody');
+async function populateRegionDropdown() {
+    const select = document.getElementById('analytics-region-select');
+    if (!select) return;
+
+    try {
+        // Fetch if not cached
+        if (!cachedRegions) {
+            cachedRegions = await fetchRegions();
+        }
+
+        const regions = cachedRegions;
+
+        // Role check logic (same as before)
+        const user = state.currentUser;
+        if (user && user.role === 'region_admin' && user.region_id) {
+            // Filter for Region Admin
+            const myRegion = regions.find(r => r.id === user.region_id);
+            if (myRegion) {
+                select.innerHTML = `<option value="${myRegion.id}">${myRegion.name}</option>`;
+                return;
+            }
+        }
+
+        // Sys Admin or default
+        // Preserve current selection if possible? 
+        // For simplicity, just rebuild. usage pattern implies "loading view" resets usually.
+        // But if we want to support "refresh" button without losing selection we should check current value.
+        // However, this function is mainly called on load.
+
+        select.innerHTML = '<option value="all">All Regions</option>' +
+            regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+
+    } catch (e) {
+        console.error("Failed to load regions list", e);
+    }
+}
+
+function renderScorecards(stats) {
+    if (!stats) return;
+
+    setText('stats-total-exit', formatCurrency(stats.total_q2_exit));
+    setText('stats-total-upside', formatCurrency(stats.total_upside));
+
+    setText('stats-new-logo-sum', formatCurrency(stats.new_logo_sum));
+    setText('stats-new-logo-count', `(${stats.new_logo_count})`);
+
+    setText('stats-existing-sum', formatCurrency(stats.existing_sum));
+    setText('stats-existing-count', `(${stats.existing_count})`);
+
+    setText('stats-non-rep-sum', formatCurrency(stats.non_reportable_sum));
+    setText('stats-non-rep-count', `(${stats.non_reportable_count})`);
+}
+
+function renderBreakdownTable(clusters) {
+    const tbody = document.getElementById('analytics-table-body');
     if (!tbody) return;
 
-    if (!data.sales_reps || data.sales_reps.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" class="loading">No sales reps found</td></tr>';
+    if (!clusters || clusters.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7">No data available</td></tr>';
         return;
     }
 
-    // Initialize cluster-wide totals
-    const totals = {
-        last_year_exit: 0,
-        q1_exit: 0,
-        q2_exit: 0,
-        q3_exit: 0,
-        q4_exit: 0
-    };
-
-    // Calculate aggregated QoQ averages
-    const avgQ1QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q1_qoq_pct || 0), 0) / data.sales_reps.length;
-    const avgQ2QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q2_qoq_pct || 0), 0) / data.sales_reps.length;
-    const avgQ3QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q3_qoq_pct || 0), 0) / data.sales_reps.length;
-    const avgQ4QoQ = data.sales_reps.reduce((sum, r) => sum + (r.q4_qoq_pct || 0), 0) / data.sales_reps.length;
-
-    // Sum up individual columns
-    data.sales_reps.forEach(rep => {
-        totals.last_year_exit += rep.last_year_exit || 0;
-        totals.q1_exit += rep.q1_exit || 0;
-        totals.q2_exit += rep.q2_exit || 0;
-        totals.q3_exit += rep.q3_exit || 0;
-        totals.q4_exit += rep.q4_exit || 0;
-    });
-
-    // Generate table rows
-    tbody.innerHTML = data.sales_reps.map(rep => `
+    tbody.innerHTML = clusters.map(c => `
         <tr>
-            <td class="fixed-col">${rep.name}</td>
-            <td>${formatCurrency(rep.last_year_exit)}</td>
-            <td>${formatCurrency(rep.q1_exit)}</td>
-            <td class="${getPercentColorClass(rep.q1_qoq_pct)}">${formatPercent(rep.q1_qoq_pct)}</td>
-            <td>${formatCurrency(rep.q2_exit)}</td>
-            <td class="${getPercentColorClass(rep.q2_qoq_pct)}">${formatPercent(rep.q2_qoq_pct)}</td>
-            <td>${formatCurrency(rep.q3_exit)}</td>
-            <td class="${getPercentColorClass(rep.q3_qoq_pct)}">${formatPercent(rep.q3_qoq_pct)}</td>
-            <td>${formatCurrency(rep.q4_exit)}</td>
-            <td class="${getPercentColorClass(rep.q4_qoq_pct)}">${formatPercent(rep.q4_qoq_pct)}</td>
+            <td>${c.name}</td>
+            <td>${formatCurrency(c.total_q2_exit)}</td>
+            <td>${formatCurrency(c.total_upside)}</td>
+            <td>${formatCurrency(c.new_logo_sum)}</td>
+            <td>${c.new_logo_count}</td>
+            <td>${formatCurrency(c.existing_sum)}</td>
+            <td>${formatCurrency(c.non_reportable_sum)}</td>
         </tr>
-    `).join('') + `
-        <tr class="totals-row">
-            <td class="fixed-col"><strong>TOTAL</strong></td>
-            <td><strong>${formatCurrency(totals.last_year_exit)}</strong></td>
-            <td><strong>${formatCurrency(totals.q1_exit)}</strong></td>
-            <td class="${getPercentColorClass(avgQ1QoQ)}"><strong>${formatPercent(avgQ1QoQ)}</strong></td>
-            <td><strong>${formatCurrency(totals.q2_exit)}</strong></td>
-            <td class="${getPercentColorClass(avgQ2QoQ)}"><strong>${formatPercent(avgQ2QoQ)}</strong></td>
-            <td><strong>${formatCurrency(totals.q3_exit)}</strong></td>
-            <td class="${getPercentColorClass(avgQ3QoQ)}"><strong>${formatPercent(avgQ3QoQ)}</strong></td>
-            <td><strong>${formatCurrency(totals.q4_exit)}</strong></td>
-            <td class="${getPercentColorClass(avgQ4QoQ)}"><strong>${formatPercent(avgQ4QoQ)}</strong></td>
-        </tr>
-    `;
+    `).join('');
 }
+
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+}
+
+// Event Listeners
+document.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'analytics-region-select') {
+        loadAnalyticsData();
+    }
+});

@@ -75,7 +75,8 @@ body {
     top: 0;
     left: 0;
     right: 0;
-    height: 80px;
+    min-height: 80px;
+    /* Changed from height to min-height to avoid cutting off content */
     background: rgba(255, 255, 255, 0.85);
     /* Glassmorphism */
     backdrop-filter: blur(12px);
@@ -91,12 +92,23 @@ body {
 
 .top-nav-container {
     width: 100%;
-    max-width: 1400px;
+    /* max-width: 1400px; */
+    /* Removed to use full screen width */
     margin: 0 auto;
-    padding: 0 40px;
+    padding: 0 24px;
+    display: flex;
+    flex-direction: column;
+    /* Stack the two rows vertically */
+    gap: 12px;
+}
+
+/* New styles for the two rows */
+.header-top-row,
+.header-bottom-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    width: 100%;
 }
 
 .logo {
@@ -116,6 +128,8 @@ body {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    white-space: nowrap;
+    /* Prevent wrapping */
 }
 
 .nav-menu {
@@ -160,6 +174,46 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 12px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 20px;
+    margin-top: 7px;
+}
+
+.user-info .user-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.user-info .user-role {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: capitalize;
+    padding: 2px 8px;
+    background: var(--accent-blue);
+    color: white;
+    border-radius: 10px;
+}
+
+.logout-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2rem;
+    padding: 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.logout-btn:hover {
+    opacity: 1;
 }
 
 .seed-only-btn,
@@ -219,8 +273,8 @@ body {
 /* ===== Main Content ===== */
 .main-content {
     flex: 1;
-    padding: 104px 40px 40px;
-    /* Top nav is 72px, so 72 + 32 = 104 */
+    padding: 160px 40px 40px;
+    /* Top nav is taller now (~120px) + spacing */
     background: var(--bg-dark);
     min-height: 100vh;
 }
@@ -508,7 +562,7 @@ body {
 }
 
 .highlight-blue {
-    background: rgba(79, 140, 255, 0.1);
+    background: rgba(79, 140, 255, 0.1) !important;
     color: var(--accent-blue);
     font-weight: 600;
 }
@@ -817,6 +871,10 @@ body {
     color: var(--text-primary);
 }
 
+.modal-body {
+    padding: 24px;
+}
+
 #workload-form {
     padding: 16px;
 }
@@ -941,6 +999,81 @@ body {
 .admin-form-grid input:focus {
     outline: none;
     border-color: var(--accent-blue);
+}
+
+/* ===== Admin Tabs ===== */
+.admin-tabs {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 32px;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    background: none;
+    border: none;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 12px 4px;
+    cursor: pointer;
+    position: relative;
+    transition: var(--transition);
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-blue);
+    font-weight: 600;
+}
+
+.tab-btn.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    /* aligns with container border */
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: var(--accent-blue);
+    border-radius: 3px 3px 0 0;
+}
+
+/* ===== Styled Dropdowns ===== */
+.admin-form-row select,
+#new-cluster-region {
+    flex: 1;
+    padding: 12px 16px;
+    background-color: var(--bg-sidebar);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    /* Increased specificty */
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23757575' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+    background-size: 12px;
+}
+
+.admin-form-row select:hover,
+#new-cluster-region:hover {
+    border-color: var(--accent-blue);
+    background-color: var(--bg-card);
+}
+
+.admin-form-row select:focus,
+#new-cluster-region:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15);
 }
 
 /* Cluster Cards */
@@ -1803,4 +1936,42 @@ input[type=number]::-webkit-inner-spin-button {
 input[type=number] {
     -moz-appearance: textfield;
     appearance: textfield;
+}
+
+/* Custom Column Colors */
+.col-fct {
+    background-color: rgba(33, 150, 243, 0.1) !important;
+    /* Soft Blue */
+    color: #1565c0;
+}
+
+.col-total {
+    background-color: rgba(76, 175, 80, 0.1) !important;
+    /* Soft Green */
+    color: #2e7d32;
+}
+
+.col-qoq-plus {
+    background-color: rgba(255, 235, 59, 0.15) !important;
+    /* Soft Yellow */
+    /* Keeping text color dynamic (red/green) if possible, or override? */
+    /* The JS sets text-green/red, so background is enough */
+}
+
+.col-upside {
+    background-color: rgba(156, 39, 176, 0.1) !important;
+    /* Soft Purple */
+    color: #6a1b9a;
+}
+
+.data-table td.col-fct strong,
+.data-table td.col-total strong,
+.data-table td.col-upside strong {
+    font-weight: 600;
+}
+
+.col-qoq {
+    background-color: rgba(255, 152, 0, 0.1) !important;
+    /* Soft Orange */
+    /* Dynamic text color handled by getPercentColorClass */
 }

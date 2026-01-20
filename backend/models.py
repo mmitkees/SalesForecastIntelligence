@@ -30,6 +30,23 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+class Region(Base):
+    """
+    Represents a geographical region containing multiple clusters.
+    
+    Attributes:
+        id (int): Primary key.
+        name (str): The name of the region.
+    """
+    __tablename__ = "regions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+
+    # One-to-many relationship with Cluster
+    clusters = relationship("Cluster", back_populates="region", cascade="all, delete-orphan")
+
+
 class Cluster(Base):
     """
     Represents a geographical or logical grouping of Sales Representatives.
@@ -37,15 +54,20 @@ class Cluster(Base):
     Attributes:
         id (int): Primary key.
         name (str): The name of the cluster.
+        region_id (int): Foreign key to the parent Region.
         partial_data_date (str): Stores the date of partial monthly data for current month calculations.
     """
     __tablename__ = "clusters"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
+    # Foreign key to Region
+    region_id = Column(Integer, ForeignKey("regions.id"), nullable=True)
     # e.g., "2026-01-15" - used to determine if we are in a partial month for estimates
     partial_data_date = Column(String(20))
 
+    # Relationships
+    region = relationship("Region", back_populates="clusters")
     # One-to-many relationship with SalesRep
     sales_reps = relationship("SalesRep", back_populates="cluster", cascade="all, delete-orphan")
 
@@ -84,11 +106,21 @@ class SalesRep(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     # Foreign key link to the Cluster
-    cluster_id = Column(Integer, ForeignKey("clusters.id"), nullable=False)
+    cluster_id = Column(Integer, ForeignKey("clusters.id"), nullable=True)
     # Foreign key link to the Fiscal Year
     fiscal_year_id = Column(Integer, ForeignKey("fiscal_years.id"), nullable=False)
     # Name of the Sales Representative
     name = Column(String(100), nullable=False)
+    
+    # --- Authentication Fields ---
+    # Username for login (unique)
+    username = Column(String(100), unique=True, nullable=True)
+    # Hashed password
+    password_hash = Column(String(256), nullable=True)
+    # Role: 'system_admin', 'region_admin', 'cluster_admin', 'user'
+    role = Column(String(50), default='user')
+    # Direct region assignment for Region Admins (optional, nullable)
+    region_id = Column(Integer, ForeignKey("regions.id"), nullable=True)
     
     # --- Historical & Baseline Data ---
     # Performance at the end of the previous fiscal year

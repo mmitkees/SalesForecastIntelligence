@@ -12,13 +12,16 @@ load_dotenv()
 
 import contextlib
 from datetime import datetime
-from flask import Flask, jsonify, request, send_from_directory, g
+from flask import Flask, jsonify, request, send_from_directory, g, session
 import pandas as pd
 import io
-from models import init_db, SessionLocal, Cluster, SalesRep, Workload, FiscalYear
+import hashlib
+from sqlalchemy import func
+from models import init_db, SessionLocal, Cluster, SalesRep, Workload, FiscalYear, Region
 
 # Initialize Flask application
-app = Flask(__name__, static_folder='static', static_url_path='')
+app = Flask(__name__, static_folder='../static', static_url_path='')
+app.secret_key = os.environ.get('SECRET_KEY', 'salesapp-secret-key-2026')
 
 
 def derive_fiscal_info(date_str, db):
@@ -145,6 +148,15 @@ def serve_views(filename):
     return send_from_directory(views_dir, filename)
 
 
+@app.route('/login')
+def serve_login():
+    return send_from_directory(app.static_folder, 'login.html')
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(app.static_folder, 'favicon.svg', mimetype='image/svg+xml')
+
+
 # --- API Routes ---
 
 @app.route('/api/fiscal_years', methods=['GET'])
@@ -197,6 +209,145 @@ def create_fiscal_year():
     return jsonify({"id": fy.id, "year": fy.year}), 201
 
 
+# --- Authentication API ---
+
+def hash_password(password):
+    """Simple password hashing using SHA256."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """
+    Authenticates a user by username and password.
+    Sets session user_id on success.
+    """
+    data = request.json
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+    
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+    
+    db = get_db()
+    # Case-insensitive username comparison
+    user = db.query(SalesRep).filter(func.lower(SalesRep.username) == username.lower()).first()
+    
+    if not user or user.password_hash != hash_password(password):
+        return jsonify({"error": "Invalid credentials"}), 401
+    
+    session['user_id'] = user.id
+    return jsonify({
+        "id": user.id,
+        "name": user.name,
+        "username": user.username,
+        "role": user.role,
+        "cluster_id": user.cluster_id
+    })
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def logout():
+    """Clears the user session."""
+    session.pop('user_id', None)
+    return jsonify({"message": "Logged out"})
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def get_current_user():
+    """
+    Returns the currently logged-in user's info.
+    """
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    db = get_db()
+    user = db.query(SalesRep).get(user_id)
+    if not user:
+        session.pop('user_id', None)
+        return jsonify({"error": "User not found"}), 401
+    
+    # Get region info if available
+    region_id = None
+    region_name = None
+    if user.cluster and user.cluster.region:
+        region_id = user.cluster.region.id
+        region_name = user.cluster.region.name
+    
+    return jsonify({
+        "id": user.id,
+        "name": user.name,
+        "username": user.username,
+        "role": user.role,
+        "cluster_id": user.cluster_id,
+        "cluster_name": user.cluster.name if user.cluster else None,
+        "region_id": region_id,
+        "region_name": region_name
+    })
+
+
+# --- Region API ---
+
+@app.route('/api/regions', methods=['GET'])
+def get_regions():
+    """
+    Retrieves all regions.
+    """
+    db = get_db()
+    regions = db.query(Region).all()
+    return jsonify([{
+        "id": r.id,
+        "name": r.name,
+        "cluster_count": len(r.clusters)
+    } for r in regions])
+
+
+@app.route('/api/regions', methods=['POST'])
+def create_region():
+    """
+    Creates a new region.
+    """
+    data = request.json
+    db = get_db()
+    region = Region(name=data.get('name', 'New Region'))
+    db.add(region)
+    db.commit()
+    db.refresh(region)
+    return jsonify({"id": region.id, "name": region.name}), 201
+
+
+@app.route('/api/regions/<int:region_id>', methods=['PUT'])
+def update_region(region_id):
+    """
+    Updates a region's name.
+    """
+    data = request.json
+    db = get_db()
+    region = db.query(Region).get(region_id)
+    if not region:
+        return jsonify({"error": "Region not found"}), 404
+    
+    region.name = data.get('name', region.name)
+    db.commit()
+    return jsonify({"id": region.id, "name": region.name})
+
+
+@app.route('/api/regions/<int:region_id>', methods=['DELETE'])
+def delete_region(region_id):
+    """
+    Deletes a region and all its clusters.
+    """
+    db = get_db()
+    region = db.query(Region).get(region_id)
+    if not region:
+        return jsonify({"error": "Region not found"}), 404
+    
+    db.delete(region)
+    db.commit()
+    return jsonify({"message": "Region deleted"})
+
+
 @app.route('/api/clusters', methods=['GET'])
 def get_clusters():
     """
@@ -210,7 +361,9 @@ def get_clusters():
     return jsonify([{
         "id": c.id, 
         "name": c.name,
-        "partial_data_date": c.partial_data_date
+        "partial_data_date": c.partial_data_date,
+        "region_id": c.region_id,
+        "region_name": c.region.name if c.region else None
     } for c in clusters])
 
 
@@ -224,11 +377,19 @@ def create_cluster():
     """
     data = request.json
     db = get_db()
-    cluster = Cluster(name=data.get('name', 'New Cluster'))
+    cluster = Cluster(
+        name=data.get('name', 'New Cluster'),
+        region_id=data.get('region_id')
+    )
     db.add(cluster)
     db.commit()
     db.refresh(cluster)
-    return jsonify({"id": cluster.id, "name": cluster.name, "partial_data_date": cluster.partial_data_date}), 201
+    return jsonify({
+        "id": cluster.id, 
+        "name": cluster.name, 
+        "partial_data_date": cluster.partial_data_date,
+        "region_id": cluster.region_id
+    }), 201
 
 
 @app.route('/api/clusters/<int:cluster_id>', methods=['PUT'])
@@ -253,6 +414,8 @@ def update_cluster(cluster_id):
         cluster.name = data.get('name')
     if 'partial_data_date' in data:
         cluster.partial_data_date = data.get('partial_data_date')
+    if 'region_id' in data:
+        cluster.region_id = data.get('region_id')
     
     db.commit()
     return jsonify({
@@ -285,6 +448,14 @@ def get_dashboard(cluster_id):
     # Build query for sales reps within the cluster
     sales_reps_query = db.query(SalesRep).filter(SalesRep.cluster_id == cluster_id)
     
+    # SECURITY: Role-based filtering
+    user_id = session.get('user_id')
+    if user_id:
+        current_user = db.query(SalesRep).filter(SalesRep.id == user_id).first()
+        if current_user and current_user.role == 'user':
+            # Force filter to ONLY this user
+            sales_reps_query = sales_reps_query.filter(SalesRep.id == user_id)
+
     # Filter by Fiscal Year (Optional, default to latest)
     fiscal_year_id = request.args.get('fiscal_year_id')
     if fiscal_year_id:
@@ -295,26 +466,37 @@ def get_dashboard(cluster_id):
         if latest_fy:
             sales_reps_query = sales_reps_query.filter(SalesRep.fiscal_year_id == latest_fy.id)
 
+    # Exclude admins from the dashboard data (they view but aren't displayed as rows)
+    sales_reps_query = sales_reps_query.filter(
+        ~SalesRep.role.in_(['system_admin', 'region_admin', 'cluster_admin'])
+    ).order_by(SalesRep.name.asc())
+
     sales_reps = sales_reps_query.all()
 
     # --- KPI Calculations ---
     
+    # Helper to safely get float value
+    def safe_float(val):
+        return float(val) if val is not None else 0.0
+
     # Total exit amount across all reps in Q2 (a primary baseline)
-    total_q2_exit = sum(sr.q2_exit for sr in sales_reps)
+    total_q2_exit = sum(safe_float(sr.q2_exit) for sr in sales_reps)
     
     # Calculate Average Quarter-over-Quarter Growth (Q1 Exit vs Previous Year Exit)
     total_q1_qoq = 0
     valid_reps_count = 0
     for sr in sales_reps:
-        if sr.last_year_exit:
+        ly_exit = safe_float(sr.last_year_exit)
+        q1_exit = safe_float(sr.q1_exit)
+        if ly_exit:
             # Percentage growth calculation
-            qoq = ((sr.q1_exit / sr.last_year_exit) - 1) * 100
+            qoq = ((q1_exit / ly_exit) - 1) * 100
             total_q1_qoq += qoq
             valid_reps_count += 1
     
     avg_qoq_growth = total_q1_qoq / valid_reps_count if valid_reps_count else 0
     # Total potential upside for Q3
-    total_upside = sum(sr.q3_add_upside for sr in sales_reps) 
+    total_upside = sum(safe_float(sr.q3_add_upside) for sr in sales_reps) 
     # Risk factor: How much of our target exit is contingent on deals marked as Upside
     pct_exit_dependent_on_upside = (total_upside / total_q2_exit * 100) if total_q2_exit else 0
 
@@ -322,98 +504,118 @@ def get_dashboard(cluster_id):
     for sr in sales_reps:
         # Sequential Quarter-over-Quarter Growth Calculations (On-the-fly)
         
+        # Safe values for calculations
+        last_year_exit = safe_float(sr.last_year_exit)
+        q1_exit = safe_float(sr.q1_exit)
+        q1_total = safe_float(sr.q1_total_exit_with_fc)
+        q2_exit = safe_float(sr.q2_exit)
+        q2_total = safe_float(sr.q2_total_exit_with_fc)
+        q3_exit = safe_float(sr.q3_exit)
+        q3_total = safe_float(sr.q3_total_exit_with_fc)
+        q4_exit = safe_float(sr.q4_exit)
+        q4_total = safe_float(sr.q4_total_exit_with_fc)
+
         # --- Q1 Calculations ---
         q1_qoq = 0.0
-        if sr.last_year_exit:
-            q1_qoq = ((sr.q1_exit / sr.last_year_exit) - 1) * 100
+        if last_year_exit:
+            q1_qoq = ((q1_exit / last_year_exit) - 1) * 100
         # QoQ considering forecasted deals
         q1_qoq_plus = 0.0
-        if sr.last_year_exit:
-            q1_qoq_plus = ((sr.q1_total_exit_with_fc / sr.last_year_exit) - 1) * 100
+        if last_year_exit:
+            q1_qoq_plus = ((q1_total / last_year_exit) - 1) * 100
 
         # --- Q2 Calculations ---
         q2_qoq = 0.0
-        if sr.q1_exit:
-            q2_qoq = ((sr.q2_exit / sr.q1_exit) - 1) * 100
+        if q1_exit:
+            q2_qoq = ((q2_exit / q1_exit) - 1) * 100
         q2_qoq_plus = 0.0
-        if sr.q1_exit:
-            q2_qoq_plus = ((sr.q2_total_exit_with_fc / sr.q1_exit) - 1) * 100
+        if q1_exit:
+            q2_qoq_plus = ((q2_total / q1_exit) - 1) * 100
 
         # --- Q3 Calculations ---
         q3_qoq = 0.0
-        if sr.q2_exit:
-            q3_qoq = ((sr.q3_exit / sr.q2_exit) - 1) * 100
+        if q2_exit:
+            q3_qoq = ((q3_exit / q2_exit) - 1) * 100
         q3_qoq_plus = 0.0
-        if sr.q2_exit:
-            q3_qoq_plus = ((sr.q3_total_exit_with_fc / sr.q2_exit) - 1) * 100
+        if q2_exit:
+            q3_qoq_plus = ((q3_total / q2_exit) - 1) * 100
 
         # --- Q4 Calculations ---
         q4_qoq = 0.0
-        if sr.q3_exit:
-            q4_qoq = ((sr.q4_exit / sr.q3_exit) - 1) * 100
+        if q3_exit:
+            q4_qoq = ((q4_exit / q3_exit) - 1) * 100
         q4_qoq_plus = 0.0
-        if sr.q3_exit:
-            q4_qoq_plus = ((sr.q4_total_exit_with_fc / sr.q3_exit) - 1) * 100
+        if q3_exit:
+            q4_qoq_plus = ((q4_total / q3_exit) - 1) * 100
 
         # Map model fields to serializable dictionary
         reps_data.append({
             "id": sr.id,
             "name": sr.name,
-            "last_year_exit": sr.last_year_exit,
+            "username": sr.username,
+            "role": sr.role,
+            "last_year_exit": last_year_exit,
             
             # Q1 Metrics
-            "q1_exit": sr.q1_exit,
-            "q1_add_fct": sr.q1_add_fct,
-            "q1_total_exit_with_fc": sr.q1_total_exit_with_fc,
-            "q1_add_upside": sr.q1_add_upside,
-            "q1_qoq_pct": round(q1_qoq, 1),
-            "q1_qoq_plus_fct_pct": round(q1_qoq_plus, 1),
+            "q1_exit": q1_exit,
+            "q1_qoq_pct": q1_qoq,
+            "q1_add_fct": safe_float(sr.q1_add_fct),
+            "q1_total_exit_with_fc": q1_total,
+            "q1_qoq_plus_fct_pct": q1_qoq_plus,
+            "q1_add_upside": safe_float(sr.q1_add_upside),
             
             # Q2 Metrics
-            "q2_exit": sr.q2_exit,
-            "q2_add_fct": sr.q2_add_fct,
-            "q2_total_exit_with_fc": sr.q2_total_exit_with_fc,
-            "q2_add_upside": sr.q2_add_upside,
-            "q2_qoq_pct": round(q2_qoq, 1),
-            "q2_qoq_plus_fct_pct": round(q2_qoq_plus, 1),
+            "q2_exit": q2_exit,
+            "q2_qoq_pct": q2_qoq,
+            "q2_add_fct": safe_float(sr.q2_add_fct),
+            "q2_total_exit_with_fc": q2_total,
+            "q2_qoq_plus_fct_pct": q2_qoq_plus,
+            "q2_add_upside": safe_float(sr.q2_add_upside),
+
+            # Monthly Actuals
+            "jan": safe_float(sr.jan),
+            "feb": safe_float(sr.feb),
+            "mar": safe_float(sr.mar),
+            "apr": safe_float(sr.apr),
+            "may": safe_float(sr.may),
+            "jun": safe_float(sr.jun),
+            "jul": safe_float(sr.jul),
+            "aug": safe_float(sr.aug),
+            "sep": safe_float(sr.sep),
+            "oct": safe_float(sr.oct),
+            "nov": safe_float(sr.nov),
+            "dec": safe_float(sr.dec),
             
-            # Prediction Drivers
-            "last_week_daily_rate": sr.last_week_daily_rate,
-            "current_daily_rate": sr.current_daily_rate,
-            "simulation": sr.simulation,
-            
-            # Flattened Monthly Data
-            "jan": sr.jan, "feb": sr.feb, "mar": sr.mar, "apr": sr.apr,
-            "may": sr.may, "jun": sr.jun, "jul": sr.jul, "aug": sr.aug,
-            "sep": sr.sep, "oct": sr.oct, "nov": sr.nov, "dec": sr.dec,
-            
-            "current_month_est": sr.current_month_est,
-            
-            # Q3 Projections
-            "q3_exit": sr.q3_exit,
-            "q3_add_fct": sr.q3_add_fct,
-            "q3_total_exit_with_fc": sr.q3_total_exit_with_fc,
-            "q3_add_upside": sr.q3_add_upside,
-            "q3_qoq_pct": round(q3_qoq, 1),
-            "qoq_plus_fct_pct": round(q3_qoq_plus, 1),
-            
-            # Q4 Projections
-            "q4_exit": sr.q4_exit,
-            "q4_add_fct": sr.q4_add_fct,
-            "q4_total_exit_with_fc": sr.q4_total_exit_with_fc,
-            "q4_add_upside": sr.q4_add_upside,
-            "q4_qoq_pct": round(q4_qoq, 1),
-            "q4_qoq_plus_fct_pct": round(q4_qoq_plus, 1),
-            
-            "risk_flag": sr.risk_flag # Computed property from model
+            # Estimates
+            "partial_data_date": sr.partial_data_date,
+            "current_month_est": safe_float(sr.current_month_est),
+            "last_week_daily_rate": safe_float(sr.last_week_daily_rate),
+            "current_daily_rate": safe_float(sr.current_daily_rate),
+            "simulation": safe_float(sr.simulation),
+
+            # Q3 Metrics
+            "q3_exit": q3_exit,
+            "q3_qoq_pct": q3_qoq,
+            "q3_add_fct": safe_float(sr.q3_add_fct),
+            "q3_total_exit_with_fc": q3_total,
+            "qoq_plus_fct_pct": q3_qoq_plus, # Matches frontend expectation for Q3
+            "q3_add_upside": safe_float(sr.q3_add_upside),
+
+            # Q4 Metrics
+            "q4_exit": q4_exit,
+            "q4_qoq_pct": q4_qoq,
+            "q4_add_fct": safe_float(sr.q4_add_fct),
+            "q4_total_exit_with_fc": q4_total,
+            "q4_qoq_plus_fct_pct": q4_qoq_plus,
+            "q4_add_upside": safe_float(sr.q4_add_upside)
         })
 
     return jsonify({
-        "cluster": {
-            "id": cluster.id, 
-            "name": cluster.name,
-            "partial_data_date": cluster.partial_data_date
-        },
+        "cluster_id": cluster.id, 
+        "cluster_name": cluster.name,
+        "partial_data_date": cluster.partial_data_date,
+        "region_id": cluster.region_id,
+        "region_name": cluster.region.name if cluster.region else None,
         "kpis": {
             "total_q2_exit": round(total_q2_exit, 2),
             "avg_qoq_growth": round(avg_qoq_growth, 2),
@@ -444,8 +646,11 @@ def get_sales_reps():
         "id": r.id, 
         "name": r.name, 
         "cluster_id": r.cluster_id,
+        "region_id": r.region_id,
         "last_year_exit": r.last_year_exit,
-        "q1_exit": r.q1_exit
+        "q1_exit": r.q1_exit,
+        "username": r.username,
+        "role": r.role
     } for r in reps])
 
 
@@ -468,16 +673,29 @@ def create_sales_rep():
         fy_id = latest_fy.id
 
     rep = SalesRep(
-        cluster_id=data['cluster_id'],
+        cluster_id=data.get('cluster_id'),  # Now optional
+        region_id=data.get('region_id'),    # For Region Admins
         fiscal_year_id=fy_id,
         name=data['name'],
         last_year_exit=data.get('last_year_exit', 0),
-        q1_exit=data.get('q1_exit', 0)
+        q1_exit=data.get('q1_exit', 0),
+        username=data.get('username'),
+        role=data.get('role', 'user')
     )
+    if 'password' in data:
+         rep.password_hash = hash_password(data['password'])
+
     db.add(rep)
     db.commit()
     db.refresh(rep)
-    return jsonify({"id": rep.id, "name": rep.name}), 201
+    return jsonify({
+        "id": rep.id, 
+        "name": rep.name,
+        "cluster_id": rep.cluster_id,
+        "fiscal_year_id": rep.fiscal_year_id,
+        "username": rep.username,
+        "role": rep.role
+    }), 201
 
 
 @app.route('/api/sales_reps/<int:rep_id>', methods=['PUT'])
@@ -506,42 +724,64 @@ def update_sales_rep(rep_id):
     update_from_workloads(rep, db)
 
     # --- Step 2: Update Manual overrides/fields ---
+    # --- Step 2: Update Manual overrides/fields ---
     rep.name = data.get('name', rep.name)
-    rep.last_year_exit = float(data.get('last_year_exit', rep.last_year_exit))
+    
+    # Auth fields
+    if 'username' in data:
+        rep.username = data['username']
+    if 'role' in data:
+        rep.role = data['role']
+    if 'region_id' in data:
+        rep.region_id = data['region_id']
+    if 'cluster_id' in data:
+        rep.cluster_id = data['cluster_id']
+    if 'password' in data and data['password']:
+        rep.password_hash = hash_password(data['password'])
+
+    # Helper for safe float conversion
+    def safe_float(val):
+        if val is None: return 0.0
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return 0.0
+
+    rep.last_year_exit = safe_float(data.get('last_year_exit', rep.last_year_exit))
     
     # Quarterly Exits (Actuals or Overrides)
-    rep.q1_exit = float(data.get('q1_exit', rep.q1_exit))
-    rep.q1_add_fct = float(data.get('q1_add_fct', rep.q1_add_fct))
-    rep.q1_add_upside = float(data.get('q1_add_upside', rep.q1_add_upside))
+    rep.q1_exit = safe_float(data.get('q1_exit', rep.q1_exit))
+    rep.q1_add_fct = safe_float(data.get('q1_add_fct', rep.q1_add_fct))
+    rep.q1_add_upside = safe_float(data.get('q1_add_upside', rep.q1_add_upside))
     
-    rep.q2_exit = float(data.get('q2_exit', rep.q2_exit))
-    rep.q2_add_fct = float(data.get('q2_add_fct', rep.q2_add_fct))
-    rep.q2_add_upside = float(data.get('q2_add_upside', rep.q2_add_upside))
+    rep.q2_exit = safe_float(data.get('q2_exit', rep.q2_exit))
+    rep.q2_add_fct = safe_float(data.get('q2_add_fct', rep.q2_add_fct))
+    rep.q2_add_upside = safe_float(data.get('q2_add_upside', rep.q2_add_upside))
     
-    rep.q4_exit = float(data.get('q4_exit', rep.q4_exit))
-    rep.q4_add_fct = float(data.get('q4_add_fct', rep.q4_add_fct))
-    rep.q4_add_upside = float(data.get('q4_add_upside', rep.q4_add_upside))
+    rep.q4_exit = safe_float(data.get('q4_exit', rep.q4_exit))
+    rep.q4_add_fct = safe_float(data.get('q4_add_fct', rep.q4_add_fct))
+    rep.q4_add_upside = safe_float(data.get('q4_add_upside', rep.q4_add_upside))
     
     # Calculation Parameters
-    rep.last_week_daily_rate = float(data.get('last_week_daily_rate', rep.last_week_daily_rate))
-    rep.current_daily_rate = float(data.get('current_daily_rate', rep.current_daily_rate))
-    rep.simulation = float(data.get('simulation', rep.simulation))
+    rep.last_week_daily_rate = safe_float(data.get('last_week_daily_rate', rep.last_week_daily_rate))
+    rep.current_daily_rate = safe_float(data.get('current_daily_rate', rep.current_daily_rate))
+    rep.simulation = safe_float(data.get('simulation', rep.simulation))
     
     # Monthly Actuals
-    rep.jan = float(data.get('jan', rep.jan))
-    rep.feb = float(data.get('feb', rep.feb))
-    rep.mar = float(data.get('mar', rep.mar))
-    rep.apr = float(data.get('apr', rep.apr))
-    rep.may = float(data.get('may', rep.may))
-    rep.jun = float(data.get('jun', rep.jun))
-    rep.jul = float(data.get('jul', rep.jul))
-    rep.aug = float(data.get('aug', rep.aug))
-    rep.sep = float(data.get('sep', rep.sep))
-    rep.oct = float(data.get('oct', rep.oct))
-    rep.nov = float(data.get('nov', rep.nov))
-    rep.dec = float(data.get('dec', rep.dec))
+    rep.jan = safe_float(data.get('jan', rep.jan))
+    rep.feb = safe_float(data.get('feb', rep.feb))
+    rep.mar = safe_float(data.get('mar', rep.mar))
+    rep.apr = safe_float(data.get('apr', rep.apr))
+    rep.may = safe_float(data.get('may', rep.may))
+    rep.jun = safe_float(data.get('jun', rep.jun))
+    rep.jul = safe_float(data.get('jul', rep.jul))
+    rep.aug = safe_float(data.get('aug', rep.aug))
+    rep.sep = safe_float(data.get('sep', rep.sep))
+    rep.oct = safe_float(data.get('oct', rep.oct))
+    rep.nov = safe_float(data.get('nov', rep.nov))
+    rep.dec = safe_float(data.get('dec', rep.dec))
     
-    rep.current_month_est = float(data.get('current_month_est', rep.current_month_est))
+    rep.current_month_est = safe_float(data.get('current_month_est', rep.current_month_est))
     
     # --- Step 3: Run Estimation Engine ---
     # Calculated future months based on the new daily rate
@@ -613,6 +853,35 @@ def get_workloads():
     cluster_id = request.args.get('cluster_id')
 
     query = db.query(Workload)
+    
+    # SECURITY: Role-based filtering
+    user_id = session.get('user_id')
+    if user_id:
+        current_user = db.query(SalesRep).filter(SalesRep.id == user_id).first()
+        if current_user and current_user.role == 'user':
+            # Override any requested sales_rep_id or cluster_id to ONLY show own workloads
+            query = query.filter(Workload.sales_rep_id == user_id)
+            # Early exit from other logic to avoid accidental exposure
+            workloads = query.all()
+            return jsonify([{
+                "id": w.id,
+                "sales_rep_id": w.sales_rep_id,
+                "sales_rep_name": w.sales_rep.name if w.sales_rep else None,
+                "account_name": w.account_name,
+                "forecast_type": w.forecast_type,
+                "customer_type": w.customer_type,
+                "workload_type": w.workload_type,
+                "country": w.country,
+                "comments": w.comments,
+                "opt_id": w.opt_id,
+                "quarter": w.quarter,
+                "month_1_amt": w.month_1_amt,
+                "month_2_amt": w.month_2_amt,
+                "month_3_amt": w.month_3_amt,
+                "consumption_start_date": w.consumption_start_date,
+                "total_amount": w.total_amount
+            } for w in workloads])
+
     if sales_rep_id:
         query = query.filter(Workload.sales_rep_id == int(sales_rep_id))
     elif cluster_id:
@@ -981,7 +1250,16 @@ def upload_workloads():
             # Locate or create the Sales Rep within the current cluster context
             rep = db.query(SalesRep).filter(SalesRep.name == str(rep_name).strip(), SalesRep.cluster_id == int(cluster_id)).first()
             if not rep:
-                rep = SalesRep(name=str(rep_name).strip(), cluster_id=int(cluster_id))
+                # Critical Fix: Must assign a fiscal_year_id when creating a new rep
+                latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
+                if not latest_fy:
+                     return jsonify({"error": "No fiscal year found. Please seed database."}), 400
+                
+                rep = SalesRep(
+                    name=str(rep_name).strip(), 
+                    cluster_id=int(cluster_id),
+                    fiscal_year_id=latest_fy.id
+                )
                 db.add(rep)
                 db.flush() # Ensure rep has an ID before creating workloads
             
@@ -1253,6 +1531,133 @@ def upload_sales_data():
         db.commit()
         return jsonify({"message": f"Successfully imported {count} sales reps"}), 201
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/analytics/regions', methods=['GET'])
+def get_region_analytics():
+    """
+    Returns aggregated analytics for a specific region or globally.
+    Query Params:
+        region_id (int|str): ID of the region, or 'all' for global view.
+    """
+    try:
+        db = get_db()
+        region_id_param = request.args.get('region_id', 'all')
+        
+        # helper
+        def safe_float(val):
+            return float(val) if val is not None else 0.0
+
+        # 1. Scope Determination
+        if region_id_param == 'all':
+            clusters = db.query(Cluster).all()
+            scope_name = "All Regions"
+        else:
+            try:
+                r_id = int(region_id_param)
+                region = db.query(Region).filter(Region.id == r_id).first()
+                if not region:
+                    return jsonify({"error": "Region not found"}), 404
+                clusters = db.query(Cluster).filter(Cluster.region_id == r_id).all()
+                scope_name = region.name
+            except ValueError:
+                 return jsonify({"error": "Invalid region_id"}), 400
+
+        # 2. Aggregation Logic
+        # We need to build a list of clusters with their stats, and a global sum.
+        
+        global_stats = {
+            "total_q2_exit": 0.0,
+            "total_upside": 0.0,
+            "new_logo_count": 0,
+            "new_logo_sum": 0.0,
+            "existing_count": 0,
+            "existing_sum": 0.0,
+            "non_reportable_count": 0,
+            "non_reportable_sum": 0.0
+        }
+
+        clusters_data = []
+
+        for cluster in clusters:
+            # Get all reps for this cluster
+            reps = db.query(SalesRep).filter(SalesRep.cluster_id == cluster.id).all()
+            
+            c_stats = {
+                "id": cluster.id,
+                "name": cluster.name,
+                "total_q2_exit": 0.0,
+                "total_upside": 0.0,
+                "new_logo_count": 0,
+                "new_logo_sum": 0.0,
+                "existing_count": 0,
+                "existing_sum": 0.0,
+                "non_reportable_count": 0,
+                "non_reportable_sum": 0.0
+            }
+
+            for rep in reps:
+                # Dashboard Metric: Q2 Exit
+                c_stats["total_q2_exit"] += safe_float(rep.q2_exit)
+                
+                # Dashboard Metric: Upside
+                # Add Q3 Upside from Rep model (consistency)
+                c_stats["total_upside"] += safe_float(rep.q3_add_upside)
+                
+                # Workload Analysis
+                for wl in rep.workloads:
+                    amount = wl.total_amount
+                    
+                    # Customer Type Analysis
+                    ctype = (wl.customer_type or "").lower()
+                    if "new logo" in ctype:
+                        c_stats["new_logo_count"] += 1
+                        c_stats["new_logo_sum"] += amount
+                    elif "existing customer" in ctype:
+                        c_stats["existing_count"] += 1
+                        c_stats["existing_sum"] += amount
+                    
+                    # Workload Type Analysis
+                    wtype = (wl.workload_type or "").lower()
+                    if "non-reportable" in wtype:
+                        c_stats["non_reportable_count"] += 1
+                        c_stats["non_reportable_sum"] += amount
+
+            # Update Global Stats
+            global_stats["total_q2_exit"] += c_stats["total_q2_exit"]
+            global_stats["total_upside"] += c_stats["total_upside"]
+            
+            global_stats["new_logo_count"] += c_stats["new_logo_count"]
+            global_stats["new_logo_sum"] += c_stats["new_logo_sum"]
+            
+            global_stats["existing_count"] += c_stats["existing_count"]
+            global_stats["existing_sum"] += c_stats["existing_sum"]
+            
+            global_stats["non_reportable_count"] += c_stats["non_reportable_count"]
+            global_stats["non_reportable_sum"] += c_stats["non_reportable_sum"]
+
+            # Formatting for JSON
+            c_stats["total_q2_exit"] = round(c_stats["total_q2_exit"], 2)
+            c_stats["total_upside"] = round(c_stats["total_upside"], 2)
+            c_stats["new_logo_sum"] = round(c_stats["new_logo_sum"], 2)
+            c_stats["existing_sum"] = round(c_stats["existing_sum"], 2)
+            c_stats["non_reportable_sum"] = round(c_stats["non_reportable_sum"], 2)
+            
+            clusters_data.append(c_stats)
+
+        # Formatting Global
+        global_stats["total_q2_exit"] = round(global_stats["total_q2_exit"], 2)
+        global_stats["total_upside"] = round(global_stats["total_upside"], 2)
+        global_stats["new_logo_sum"] = round(global_stats["new_logo_sum"], 2)
+        global_stats["existing_sum"] = round(global_stats["existing_sum"], 2)
+        global_stats["non_reportable_sum"] = round(global_stats["non_reportable_sum"], 2)
+
+        return jsonify({
+            "scope_name": scope_name,
+            "aggregates": global_stats,
+            "clusters": clusters_data
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

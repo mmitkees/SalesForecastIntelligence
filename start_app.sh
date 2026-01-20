@@ -91,4 +91,4 @@ echo -e "Press Ctrl+C to stop."
 echo -e "----------------------------------------\n"
 
 export PORT=$PORT
-python app.py
+python backend/app.py

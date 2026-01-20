@@ -16,7 +16,11 @@ let currentCommentsWorkloadId = null;
 export async function loadWorkloadsData() {
     if (!document.getElementById('workloads-quarters-container')) return;
 
-    if (!state.currentClusterId) return;
+    if (!state.currentClusterId) {
+        setState('workloads', []);
+        reRenderWorkloadTables();
+        return;
+    }
 
     try {
         const reps = await fetchSalesReps(state.currentClusterId);
@@ -46,7 +50,7 @@ export function reRenderWorkloadTables() {
     const container = document.getElementById('workloads-quarters-container');
     if (!container) return;
 
-    const workloads = state.workloads;
+    const workloads = state.workloads || [];
 
     // Ensure metadata consistency
     workloads.forEach(w => {
@@ -127,7 +131,7 @@ function renderQuarterSection(quarter, title, months) {
                 <span id="${qLower}-sum-won" style="font-weight: bold; color: #10b981;">WON: $0</span>
                 <span id="${qLower}-sum-forecast" style="font-weight: bold; color: #3b82f6;">FCT: $0</span>
                 <span id="${qLower}-sum-upside" style="font-weight: bold; color: #a855f7;">UPS: $0</span>
-                <button class="export-btn" onclick="exportToExcel('${quarter}', event)">📥 Export</button>
+                <button class="export-btn" onclick="exportQuarterWorkloadToExcel('${quarter}', event)">📥 Export</button>
             </div>
         </div>
         <div class="quarter-content" id="${qLower}-content">
@@ -275,8 +279,10 @@ function renderWorkloadTable(data, tbodyId, quarter) {
 function populateSalesRepDropdown(reps) {
     const select = document.getElementById('wl-sales-rep');
     if (select) {
+        // Filter out admins - only regular sales reps should be assigned workloads
+        const salesRepsOnly = reps.filter(r => !r.role || r.role === 'user');
         select.innerHTML = '<option value="">Select Sales Rep</option>' +
-            reps.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+            salesRepsOnly.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
     }
 }
 
@@ -287,9 +293,11 @@ function populateAccountManagerFilter(reps) {
     const filter = document.getElementById('filter-account-manager');
     if (!filter) return;
 
+    // Filter out admins - only show regular sales reps
+    const salesRepsOnly = reps.filter(r => !r.role || r.role === 'user');
     const currentVal = filter.value;
     filter.innerHTML = '<option value="">All Account Managers</option>' +
-        reps.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+        salesRepsOnly.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
     filter.value = currentVal;
 }
 
@@ -576,7 +584,7 @@ window.toggleQuarterSection = function (quarter) {
 /**
  * Exports the visible data for a specific quarter to Excel.
  */
-window.exportToExcel = function (quarter, event) {
+window.exportQuarterWorkloadToExcel = function (quarter, event) {
     if (event) event.stopPropagation();
 
     const workloads = state.workloads;
@@ -603,10 +611,18 @@ window.exportToExcel = function (quarter, event) {
         'Comments': w.comments
     }));
 
+    // Get cluster name from dropdown
+    const clusterSelect = document.getElementById('cluster-select');
+    const clusterName = clusterSelect?.options[clusterSelect.selectedIndex]?.text || 'Cluster';
+
+    // Format short date as YYYYMMDD
+    const now = new Date();
+    const shortDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, `${quarter} Workloads`);
-    XLSX.writeFile(wb, `Sales_Intel_Workloads_${quarter}.xlsx`);
+    XLSX.writeFile(wb, `${clusterName}-${quarter}-Workloads-${shortDate}.xlsx`);
 };
 
 /**

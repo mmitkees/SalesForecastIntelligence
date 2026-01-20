@@ -43,13 +43,18 @@ const mkInput = (repId, field, value, type = 'number') => `
  */
 export async function loadDashboardData() {
     if (!document.getElementById('quarterly-breakdowns-container')) return;
-    if (!state.currentClusterId) return;
+
+    // Handle No Cluster State
+    if (!state.currentClusterId) {
+        renderDashboard({ sales_reps: [] });
+        return;
+    }
 
     try {
         const dashboardData = await fetchDashboard(state.currentClusterId, state.currentFiscalYearId);
 
         // Sync cluster-level metadata
-        state.partialDataDate = dashboardData.cluster?.partial_data_date || null;
+        state.partialDataDate = dashboardData.partial_data_date || null;
 
         renderDashboard(dashboardData);
 
@@ -71,7 +76,7 @@ export async function loadDashboardData() {
  * Main render loop for the dashboard view.
  */
 function renderDashboard(data) {
-    if (!data.sales_reps) return;
+    const reps = data.sales_reps || [];
 
     // Determine current fiscal quarter for default expansion
     // Determine current fiscal quarter for default expansion
@@ -85,7 +90,7 @@ function renderDashboard(data) {
     // Use saved quarter or default to current quarter
     const quarterToExpand = state.dashboardExpandedQuarter || currentQuarter;
 
-    renderQuarterlyBreakdowns(data.sales_reps, currentQuarter);
+    renderQuarterlyBreakdowns(reps, currentQuarter);
 
     // Initial Accordion State - expand saved or current quarter
     const targetContent = document.getElementById(`${quarterToExpand}-content`);
@@ -152,12 +157,12 @@ function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
 
     columns.push(
         { key: 'sim', label: 'Sim', subtle: true },
-        { key: 'qEst', label: `${q.toUpperCase()} Est`, blue: true },
-        { key: 'qQoQ', label: 'QoQ', type: 'percent', color: true },
-        { key: 'addFct', label: 'Add FCT', readOnly: true },
-        { key: 'totalExit', label: 'Total Exit', strong: true },
-        { key: 'qoqPlusFct', label: 'QoQ+', type: 'percent', color: true },
-        { key: 'upside', label: 'Upside', readOnly: true }
+        { key: 'qEst', label: `${q.toUpperCase()} Est`, blue: true, customClass: 'highlight-blue' },
+        { key: 'qQoQ', label: 'QoQ', type: 'percent', color: true, customClass: 'col-qoq' },
+        { key: 'addFct', label: 'Add FCT', readOnly: true, customClass: 'col-fct' },
+        { key: 'totalExit', label: 'Total Exit', strong: true, customClass: 'col-total' },
+        { key: 'qoqPlusFct', label: 'QoQ+', type: 'percent', color: true, customClass: 'col-qoq-plus' },
+        { key: 'upside', label: 'Upside', readOnly: true, customClass: 'col-upside' }
     );
 
     // 2. Field Mapping logic
@@ -248,7 +253,7 @@ function renderSection(q, reps, config) {
             if (mKey) monthSum += (r[mKey] || 0);
         });
 
-        if (f.qEst && r[f.qEst] === 0) {
+        if (f.qEst) {
             r[f.qEst] = monthSum + (r.simulation || 0);
         }
 
@@ -291,16 +296,18 @@ function renderSection(q, reps, config) {
             const fieldName = f[c.key], val = fieldName ? (rep[fieldName] || 0) : 0;
             const forceEdit = isOverride && fieldName && (c.key === 'prevExit' || c.key === 'prevQoQ');
 
+            const baseCls = c.customClass || '';
+
             if (c.type === 'percent' && !forceEdit) {
-                return `<td class="${getPercentColorClass(val)}">${fieldName ? formatPercent(val) : '-'}</td>`;
+                return `<td class="${getPercentColorClass(val)} ${baseCls}">${fieldName ? formatPercent(val) : '-'}</td>`;
             }
 
             const isStandardInput = fieldName && !c.readOnly && !c.blue && !c.strong && !c.label.includes('Exit');
             if (forceEdit || isStandardInput) {
-                return `<td>${mkInput(rep.id, fieldName, val, c.type === 'date' ? 'date' : 'number')}</td>`;
+                return `<td class="${baseCls}">${mkInput(rep.id, fieldName, val, c.type === 'date' ? 'date' : 'number')}</td>`;
             } else {
                 let txt = fieldName ? (c.type === 'date' ? val : formatCurrency(val)) : '-';
-                const cls = `${c.subtle ? 'subtle' : ''} ${c.blue ? 'highlight-blue' : ''}`;
+                const cls = `${c.subtle ? 'subtle' : ''} ${c.blue ? 'highlight-blue' : ''} ${baseCls}`;
                 return `<td class="${cls}">${c.strong ? `<strong>${txt}</strong>` : txt}</td>`;
             }
         }).join('');
@@ -314,13 +321,16 @@ function renderSection(q, reps, config) {
     }).join('');
 
     const tCell = (c) => {
+        const baseCls = c.customClass || (c.blue ? 'highlight-blue' : '');
+
         if (c.type === 'percent') {
             const val = totals[c.key] || 0;
             const hasVal = (c.key === 'prevQoQ' && totalPrevDenom > 0) || (c.key === 'qQoQ' && f.qEst) || (c.key === 'qoqPlusFct' && f.totalExit);
-            return `<td class="${getPercentColorClass(val)}"><strong>${hasVal ? formatPercent(val) : '-'}</strong></td>`;
+            return `<td class="${getPercentColorClass(val)} ${baseCls}"><strong>${hasVal ? formatPercent(val) : '-'}</strong></td>`;
         }
         const val = totals[c.key];
-        return `<td class="${c.blue ? 'highlight-blue' : ''}"><strong>${(f[c.key] || val !== 0) ? formatCurrency(val) : '-'}</strong></td>`;
+        // Blue is handled by baseCls now, but we keep existing logic check
+        return `<td class="${baseCls}"><strong>${(f[c.key] || val !== 0) ? formatCurrency(val) : '-'}</strong></td>`;
     };
 
     const month = new Date().getMonth() + 1;
@@ -340,22 +350,26 @@ function renderSection(q, reps, config) {
     const isOverrideActive = state.overrides?.[qLower];
 
     return `
-    <div class="quarterly-breakdown" style="margin-bottom: 24px;">
-        <div class="quarter-header-wrapper" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <button class="collapse-btn" id="${q}-toggle" onclick="toggleQuarter('${q}')" style="flex: 1; margin-bottom: 0;">
-                <span id="${q}-icon">▶</span> ${config.title}
-            </button>
-            <button class="override-btn" onclick="window.toggleOverride('${qLower}', event)" 
-                    style="margin-left: 10px; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border-color); background: ${isOverrideActive ? 'rgba(231, 76, 60, 0.15)' : 'rgba(255,255,255,0.05)'}; color: ${isOverrideActive ? 'var(--accent-red)' : 'var(--text-muted)'}; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                <span>${isOverrideActive ? '🔓' : '🔒'}</span>
-                <span>${isOverrideActive ? 'Override Active' : 'Override'}</span>
-            </button>
+    <div class="quarter-section collapsible" id="${q}-section">
+        <div class="quarter-header" onclick="toggleQuarter('${q}')">
+            <h3>
+                <span class="collapse-icon" id="${q}-icon">▼</span>
+                ${config.title}
+            </h3>
+            <div class="header-info" style="display: flex; gap: 15px; align-items: center;">
+                <button class="override-btn" onclick="window.toggleOverride('${qLower}', event)" 
+                        style="padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border-color); background: ${isOverrideActive ? 'rgba(231, 76, 60, 0.15)' : 'transparent'}; color: ${isOverrideActive ? 'var(--accent-red)' : 'var(--text-muted)'}; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                    <span>${isOverrideActive ? '🔓' : '🔒'}</span>
+                    <span>${isOverrideActive ? 'Override Active' : 'Override'}</span>
+                </button>
+                <button class="export-btn" onclick="exportQuarterDashboardToExcel('${q.toUpperCase()}', event)">📥 Export</button>
+            </div>
         </div>
-        <div class="collapse-content" id="${q}-content" style="display: none;">
+        <div class="quarter-content" id="${q}-content" style="display: none;">
             ${partialDataInput}
             <div class="table-container">
                 <table class="data-table" id="${q}-table">
-                    <thead><tr><th class="fixed-col">Sales Rep</th>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead>
+                    <thead><tr><th class="fixed-col">Sales Rep</th>${cols.map(c => `<th class="${c.customClass || ''}">${c.label}</th>`).join('')}</tr></thead>
                     <tbody id="${q}-tbody">${rows}<tr class="totals-row"><td class="fixed-col"><strong>TOTAL</strong></td>${cols.map(c => tCell(c)).join('')}</tr></tbody>
                 </table>
             </div>
@@ -373,17 +387,20 @@ window.toggleQuarter = function (quarter) {
     const content = document.getElementById(`${target}-content`), isOpen = content?.style.display === 'block';
 
     allQuarters.forEach(q => {
-        const c = document.getElementById(`${q}-content`), i = document.getElementById(`${q}-icon`), b = document.getElementById(`${q}-toggle`);
+        const c = document.getElementById(`${q}-content`);
+        const i = document.getElementById(`${q}-icon`);
+        const section = document.getElementById(`${q}-section`);
         if (c) c.style.display = 'none';
         if (i) i.textContent = '▶';
-        if (b) b.classList.remove('active');
+        if (section) section.classList.add('collapsed');
     });
 
     if (!isOpen && content) {
         content.style.display = 'block';
-        const icon = document.getElementById(`${target}-icon`), btn = document.getElementById(`${target}-toggle`);
+        const icon = document.getElementById(`${target}-icon`);
+        const section = document.getElementById(`${target}-section`);
         if (icon) icon.textContent = '▼';
-        if (btn) btn.classList.add('active');
+        if (section) section.classList.remove('collapsed');
         // Save expanded quarter to state for persistence
         setState('dashboardExpandedQuarter', target);
     } else {
@@ -490,6 +507,8 @@ function updateTotalsLocally(changedInput) {
 
         let qSum = 0; monthCols.forEach(mc => qSum += getVal(row, colIndex[mc]));
         if (colIndex[`${currMName} Act`] !== undefined) qSum -= getVal(row, colIndex[`${currMName} Act`]);
+        const sim = colIndex['Sim'] !== undefined ? getVal(row, colIndex['Sim']) : 0;
+        qSum += sim;
         if (qEstIdx !== undefined) setVal(row, qEstIdx, qSum);
 
         const pe = colIndex['Prev Q Exit'] !== undefined ? getVal(row, colIndex['Prev Q Exit']) : 0;
@@ -527,3 +546,48 @@ async function refreshQuarterData() {
     if (openQ) window.toggleQuarter(openQ);
     window.scrollTo(0, scroll);
 }
+
+/**
+ * Exports the visible data for a specific quarter from the dashboard to Excel.
+ */
+window.exportQuarterDashboardToExcel = function (quarter, event) {
+    if (event) event.stopPropagation();
+
+    const qLower = quarter.toLowerCase();
+    const table = document.getElementById(`${qLower}-table`);
+    if (!table) {
+        console.error('Table not found for quarter:', quarter);
+        return;
+    }
+
+    // Get cluster name from dropdown
+    const clusterSelect = document.getElementById('cluster-select');
+    const clusterName = clusterSelect?.options[clusterSelect.selectedIndex]?.text || 'Cluster';
+
+    // Format short date as YYYYMMDD
+    const now = new Date();
+    const shortDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
+    // Extract data from table
+    const headers = [];
+    const headerRow = table.querySelector('thead tr');
+    headerRow.querySelectorAll('th').forEach(th => headers.push(th.textContent.trim()));
+
+    const data = [];
+    const rows = table.querySelectorAll('tbody tr');
+    rows.forEach(row => {
+        const rowData = {};
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, idx) => {
+            const input = cell.querySelector('input');
+            const value = input ? input.value : cell.textContent.trim();
+            rowData[headers[idx]] = value;
+        });
+        data.push(rowData);
+    });
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, `${quarter} Dashboard`);
+    XLSX.writeFile(wb, `${clusterName}-${quarter}-Dashboard-${shortDate}.xlsx`);
+};

@@ -2,21 +2,19 @@
  * SalesApp Main Entry Point.
  * Handles primary application state management, UI routing, and global event delegation.
  */
-import { fetchClusters, seedDatabase, createCluster, fetchFiscalYears } from './api.js';
+import { fetchClusters, createCluster, fetchFiscalYears, getCurrentUser, logout, createRegion } from './api.js';
 import { loadDashboardData } from './controllers/dashboard.js';
-import { loadWorkloadsData, handleSort, openModal, closeModal, handleFormSubmit, uploadExcel, reRenderWorkloadTables, handleAccountManagerFilterChange } from './controllers/workloads.js';
+import { loadWorkloadsData, handleSort, openModal, closeModal, handleFormSubmit, uploadExcel } from './controllers/workloads.js';
 import { loadAdminData } from './controllers/admin.js';
 import { loadAnalyticsData } from './controllers/analytics.js';
 import { state, setState } from './state.js';
-import { showAlert } from './utils.js';
+import { showAlert, showConfirm } from './utils.js';
 
 // --- Shared DOM Elements ---
 const clusterSelect = document.getElementById('cluster-select');
 const fiscalYearSelect = document.getElementById('fiscal-year-select');
 const navItems = document.querySelectorAll('.nav-item');
-const seedBtn = document.getElementById('seed-btn');
 const viewContainer = document.getElementById('view-container');
-const workloadModal = document.getElementById('workload-modal');
 
 /**
  * Populates the Fiscal Year dropdown and handles selection state.
@@ -45,29 +43,60 @@ export async function loadFiscalYears() {
 /**
  * Populates the Cluster dropdown and initializes the view data.
  */
+/**
+ * Populates the Cluster dropdown and initializes the view data.
+ */
 export async function loadClusters() {
     try {
         const clusters = await fetchClusters();
-        if (clusters.length === 0) {
-            clusterSelect.innerHTML = '<option value="">No clusters - Click Seed</option>';
-            return;
-        }
-        clusterSelect.innerHTML = clusters.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        const user = state.currentUser;
 
-        // Sync local storage / state with dropdown
-        if (state.currentClusterId && clusters.some(c => c.id === state.currentClusterId)) {
-            clusterSelect.value = state.currentClusterId;
+        let filteredClusters = clusters;
+
+        // Role-based filtering
+        if (user) {
+            if (user.role === 'user') {
+                // Regular user: only show their assigned cluster
+                filteredClusters = clusters.filter(c => c.id === user.cluster_id);
+            } else if (user.role === 'region_admin') {
+                // Region Admin: only show clusters in their region
+                if (user.region_id) {
+                    filteredClusters = clusters.filter(c => c.region_id === user.region_id);
+                }
+            }
+            // System Admin sees all
+        }
+
+        if (filteredClusters.length === 0) {
+            clusterSelect.innerHTML = '<option value="">No clusters available</option>';
+            setState('currentClusterId', null); // Set to null explicitly
+            // Proceed to load views even without a cluster
         } else {
-            setState('currentClusterId', clusters[0].id);
+            clusterSelect.innerHTML = filteredClusters.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+            // Sync local storage / state with dropdown
+            if (state.currentClusterId && filteredClusters.some(c => c.id === state.currentClusterId)) {
+                clusterSelect.value = state.currentClusterId;
+            } else {
+                // Default to first available
+                if (filteredClusters.length > 0) {
+                    setState('currentClusterId', filteredClusters[0].id);
+                    clusterSelect.value = filteredClusters[0].id;
+                }
+            }
         }
 
         // Trigger data refresh for the active view
         if (state.currentView === 'dashboard') await loadDashboardData();
         if (state.currentView === 'workloads') await loadWorkloadsData();
+        if (state.currentView === 'analytics') await loadAnalyticsData();
+        if (state.currentView === 'admin') await loadAdminData();
     } catch (e) {
         console.error("Failed to load clusters", e);
     }
 }
+// Expose for Admin Controller usage (breaking circular dependency)
+window.loadClusters = loadClusters;
 
 /**
  * Dynamic View Loader (Routing).
@@ -109,12 +138,32 @@ async function loadView(viewName) {
 }
 
 // --- Global Initialization ---
+// --- Global Initialization ---
+// --- Global Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
+    // Check authentication first
+    const user = await getCurrentUser();
+
+    if (!user) {
+        // Not authenticated - redirect to login
+        window.location.href = '/login';
+        return;
+    }
+
+    // Store current user in state
+    setState('currentUser', user);
+
+    // Display user info in the header
+    displayUserInfo(user);
+
     // Restore persistent session state
     const savedView = localStorage.getItem('currentView') || 'dashboard';
     const savedClusterId = localStorage.getItem('currentClusterId');
 
-    if (savedClusterId) {
+    // For non-admins, force their assigned cluster
+    if (user.role !== 'system_admin' && user.role !== 'region_admin') {
+        setState('currentClusterId', user.cluster_id);
+    } else if (savedClusterId) {
         setState('currentClusterId', parseInt(savedClusterId));
     }
 
@@ -122,7 +171,71 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadView(savedView);
     await loadFiscalYears();
     await loadClusters();
+
+    // Hide admin nav for regular users
+    updateNavVisibility(user);
 });
+
+/**
+ * Displays user info in the header and sets up logout button.
+ */
+function displayUserInfo(user) {
+    const userInfoContainer = document.getElementById('user-info');
+    if (userInfoContainer) {
+        // New Header Design: Icon + "Hi [Name]" + Logout Icon
+        userInfoContainer.innerHTML = `
+            <div class="user-profile" style="display: flex; align-items: center; gap: 8px;">
+                <span class="user-icon" style="font-size: 1.2rem;">👤</span>
+                <span class="user-name" style="font-weight: 500;">Hi, ${user.name}</span>
+                <button id="logout-btn" title="Logout" style="background: none; border: none; cursor: pointer; font-size: 1.2rem; margin-left: 8px;">⏻</button>
+            </div>
+        `;
+
+        document.getElementById('logout-btn').addEventListener('click', async () => {
+            const confirmed = await showConfirm('Logout', 'Are you sure you want to logout?');
+            if (confirmed) {
+                await logout();
+                localStorage.removeItem('currentView'); // Force dashboard on next login
+                window.location.href = '/login';
+            }
+        });
+    }
+}
+
+/**
+ * Updates navigation visibility based on user role.
+ */
+function updateNavVisibility(user) {
+    const adminNav = document.querySelector('[data-view="admin"]');
+    const analyticsNav = document.querySelector('[data-view="analytics"]');
+
+    // Admin Page: Only System Admin
+    if (adminNav) {
+        if (user.role === 'system_admin') {
+            adminNav.style.display = 'flex';
+        } else {
+            adminNav.style.display = 'none';
+        }
+    }
+
+    // Analytics Page: System Admin and Region Admin
+    if (analyticsNav) {
+        if (user.role === 'system_admin' || user.role === 'region_admin') {
+            analyticsNav.style.display = 'flex';
+        } else {
+            analyticsNav.style.display = 'none';
+        }
+    }
+
+    // Hide cluster dropdown only for regular users (not admins)
+    // Cluster admins see their cluster, region/system admins see all
+    const clusterDropdown = document.getElementById('cluster-select');
+    if (user.role === 'user') {
+        if (clusterDropdown) clusterDropdown.style.display = 'none';
+    } else {
+        if (clusterDropdown) clusterDropdown.style.display = 'block';
+    }
+}
 
 // --- Primary Event Listeners ---
 
@@ -133,7 +246,7 @@ navItems.forEach(item => {
     });
 });
 
-// Cluster Selection Change
+// ClusterSelection Change
 clusterSelect.addEventListener('change', async (e) => {
     const newVal = parseInt(e.target.value);
     setState('currentClusterId', newVal);
@@ -152,15 +265,7 @@ fiscalYearSelect.addEventListener('change', async (e) => {
     if (state.currentView === 'analytics') await loadAnalyticsData();
 });
 
-// Seed Button (Database Initialization Override)
-seedBtn.addEventListener('click', async () => {
-    seedBtn.textContent = '⏳';
-    await seedDatabase();
-    seedBtn.textContent = '✅';
-    setTimeout(() => seedBtn.textContent = '🔄', 2000);
-    await loadClusters();
-    if (state.currentView === 'admin') await loadAdminData();
-});
+
 
 // --- Modal & Global Actions ---
 const closeModalBtn = document.getElementById('close-modal');
@@ -196,15 +301,38 @@ document.addEventListener('click', async (e) => {
     // Admin: New Cluster Creation
     if (target.id === 'add-cluster-btn') {
         const nameInput = document.getElementById('new-cluster-name');
+        const regionSelect = document.getElementById('new-cluster-region');
         const name = nameInput.value.trim();
+        const regionId = regionSelect ? regionSelect.value : null;
+
         if (!name) {
             await showAlert('Missing Information', 'Please enter a cluster name');
             return;
         }
-        await createCluster(name);
+        await createCluster(name, regionId);
         nameInput.value = '';
+        if (regionSelect) regionSelect.value = '';
         await loadClusters();
         await loadAdminData();
+    }
+
+    // Admin: New Region Creation
+    if (target.id === 'add-region-btn') {
+        const nameInput = document.getElementById('new-region-name');
+        const name = nameInput.value.trim();
+
+        if (!name) {
+            await showAlert('Missing Information', 'Please enter a region name');
+            return;
+        }
+
+        try {
+            await createRegion(name);
+            nameInput.value = '';
+            await loadAdminData(); // Refresh list
+        } catch (e) {
+            await showAlert('Error', e.message);
+        }
     }
 
     // Bulk Consumption Upload Modal

@@ -1,4 +1,5 @@
 export const state = {
+    currentUser: null,        // Logged-in user object with role
     currentClusterId: null,
     currentFiscalYearId: null,
     currentView: 'dashboard',
