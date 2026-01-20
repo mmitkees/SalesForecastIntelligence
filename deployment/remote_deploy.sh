@@ -54,7 +54,7 @@ if [ ! -f "$ENV_FILE" ]; then
     echo -e "  SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key"
     echo -e "  REMOTE_APP_DIR=/home/opc/sales-app"
     echo -e "  GIT_REPO_URL=https://github.com/mmitkees/SalesForecastIntelligence.git"
-    echo -e "  GIT_BRANCH=dev"
+    echo -e "  GIT_BRANCH=prod"
     exit 1
 fi
 
