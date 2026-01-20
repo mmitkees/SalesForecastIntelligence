@@ -54,7 +54,12 @@ check_install() {
     
     if ! command -v $cmd &> /dev/null; then
         echo -e "${YELLOW}Warning: $name is not installed.${NC}"
-        read -p "Do you want to attempt to install $name? (y/n): " INSTALL_CHOICE
+        if [ "$AUTO_INSTALL" == "true" ]; then
+            INSTALL_CHOICE="y"
+        else
+            read -p "Do you want to attempt to install $name? (y/n): " INSTALL_CHOICE
+        fi
+        
         if [ "$INSTALL_CHOICE" == "y" ]; then
             echo -e "Attempting to install $name..."
             
@@ -108,9 +113,13 @@ check_install python3 python3
 
 # 2. Deployment Mode Selection
 echo -e "\n${YELLOW}[2/5] Choose Deployment Mode:${NC}"
-echo "1) Docker Container (Recommended)"
-echo "2) Native Background Service (Systemd/Launchd)"
-read -p "Enter choice (1/2): " DEPLOY_MODE
+if [ -z "$DEPLOY_MODE" ]; then
+    echo "1) Docker Container (Recommended)"
+    echo "2) Native Background Service (Systemd/Launchd)"
+    read -p "Enter choice (1/2): " DEPLOY_MODE
+else
+    echo "Auto-selected Mode: $DEPLOY_MODE"
+fi
 
 # Check Docker if Mode 1 selected
 if [ "$DEPLOY_MODE" == "1" ]; then
@@ -120,9 +129,6 @@ if [ "$DEPLOY_MODE" == "1" ]; then
         echo -e "Falling back to Native deployment selection..."
         DEPLOY_MODE="2"
         # Or exit 1? User asked to ask to install. My check_install does ask.
-        # If they say No, or install fails -> command -v fails.
-        # So we should probably exit or asking to select native.
-        # Let's exit to be safe.
         exit 1
     else
         HAS_DOCKER=true
@@ -132,20 +138,26 @@ fi
 
 # 3. Database Configuration
 echo -e "\n${YELLOW}[3/5] Configure Database:${NC}"
-echo "1) Local SQLite (Persistent)"
-echo "2) Oracle Autonomous Database"
-read -p "Enter choice (1/2): " DB_CHOICE
+if [ -z "$DB_CHOICE" ]; then
+    echo "1) Local SQLite (Persistent)"
+    echo "2) Oracle Autonomous Database"
+    read -p "Enter choice (1/2): " DB_CHOICE
+else
+    echo "Auto-selected Database: $DB_CHOICE"
+fi
 
 # Prepare Environment Variables
 if [ "$DB_CHOICE" == "2" ]; then
     echo -e "${YELLOW}Oracle Selected. Please provide details:${NC}"
-    read -p "Enter Wallet Directory Path (absolute path): " WALLET_PATH
-    read -p "Enter Database User: " DB_USER
-    read -s -p "Enter Database Password: " DB_PASS
-    echo ""
-    read -p "Enter TNS Alias (e.g., db_high): " DB_ALIAS
+    if [ -z "$WALLET_PATH" ]; then
+        read -p "Enter Wallet Directory Path (absolute path): " WALLET_PATH
+        read -p "Enter Database User: " DB_USER
+        read -s -p "Enter Database Password: " DB_PASS
+        echo ""
+        read -p "Enter TNS Alias (e.g., db_high): " DB_ALIAS
+    fi
     
-    DB_URL="oracle+cx_oracle://${DB_USER}:${DB_PASS}@${DB_ALIAS}"
+    DB_URL="oracle+oracledb://${DB_USER}:${DB_PASS}@${DB_ALIAS}"
     IS_ORACLE=true
     
     # Check Wallet
@@ -219,7 +231,7 @@ if [ "$DEPLOY_MODE" == "1" ]; then
       --restart=always \
       -v /var/run/docker.sock:/var/run/docker.sock \
       -v portainer_data:/data \
-      portainer/portainer-ce:latest
+      docker.io/portainer/portainer-ce:latest
       
     HAS_PORTAINER=true
     echo -e "${GREEN}Portainer deployed successfully.${NC}"
