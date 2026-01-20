@@ -1,15 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# Remote Deployment Script for Sales App
+# Remote Deployment Script for Sales App (Git-Based)
 # 
 # This script:
 # 1. Reads server configuration from .env file
 # 2. Connects to remote server via SSH
-# 3. Uploads project files
-# 4. Installs dependencies
-# 5. Executes deploy.sh on the remote server
+# 3. Clones or pulls the latest code from Git
+# 4. Executes deploy.sh on the remote server
 #
-# Usage: ./remote_deploy.sh
+# Usage: ./deployment/remote_deploy.sh
 # ==============================================================================
 
 set -e  # Exit on any error
@@ -27,13 +26,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$PROJECT_ROOT/.env"
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║         Sales App - Remote Deployment Script                 ║${NC}"
+echo -e "${BLUE}║      Sales App - Remote Deployment Script (Git-Based)        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
 
 # ==============================================================================
 # Step 1: Load Environment Configuration
 # ==============================================================================
-echo -e "\n${YELLOW}[1/6] Loading configuration from .env...${NC}"
+echo -e "\n${YELLOW}[1/5] Loading configuration from .env...${NC}"
 
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${RED}Error: .env file not found at $ENV_FILE${NC}"
@@ -42,6 +41,8 @@ if [ ! -f "$ENV_FILE" ]; then
     echo -e "  REMOTE_SERVER_USER=opc"
     echo -e "  SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key"
     echo -e "  REMOTE_APP_DIR=/home/opc/sales-app"
+    echo -e "  GIT_REPO_URL=https://github.com/mmitkees/SalesForecastIntelligence.git"
+    echo -e "  GIT_BRANCH=dev"
     exit 1
 fi
 
@@ -53,8 +54,10 @@ REMOTE_SERVER_IP="${REMOTE_SERVER_IP:-129.151.159.172}"
 REMOTE_SERVER_USER="${REMOTE_SERVER_USER:-opc}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-serverkeys/ssh-key-2026-01-13.key}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/home/opc/sales-app}"
+GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/mmitkees/SalesForecastIntelligence.git}"
+GIT_BRANCH="${GIT_BRANCH:-dev}"
 
-# Resolve SSH key path (relative to script directory)
+# Resolve SSH key path (relative to project root)
 if [[ ! "$SSH_KEY_PATH" = /* ]]; then
     SSH_KEY_PATH="$PROJECT_ROOT/$SSH_KEY_PATH"
 fi
@@ -63,11 +66,13 @@ echo -e "  Server IP:    ${GREEN}$REMOTE_SERVER_IP${NC}"
 echo -e "  User:         ${GREEN}$REMOTE_SERVER_USER${NC}"
 echo -e "  SSH Key:      ${GREEN}$SSH_KEY_PATH${NC}"
 echo -e "  Remote Dir:   ${GREEN}$REMOTE_APP_DIR${NC}"
+echo -e "  Git Repo:     ${GREEN}$GIT_REPO_URL${NC}"
+echo -e "  Git Branch:   ${GREEN}$GIT_BRANCH${NC}"
 
 # ==============================================================================
 # Step 2: Validate SSH Key
 # ==============================================================================
-echo -e "\n${YELLOW}[2/6] Validating SSH key...${NC}"
+echo -e "\n${YELLOW}[2/5] Validating SSH key...${NC}"
 
 if [ ! -f "$SSH_KEY_PATH" ]; then
     echo -e "${RED}Error: SSH key not found at $SSH_KEY_PATH${NC}"
@@ -84,7 +89,7 @@ SSH_OPTS="-i $SSH_KEY_PATH -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 # ==============================================================================
 # Step 3: Test SSH Connection
 # ==============================================================================
-echo -e "\n${YELLOW}[3/6] Testing SSH connection...${NC}"
+echo -e "\n${YELLOW}[3/5] Testing SSH connection...${NC}"
 
 if ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "echo 'Connection successful'" 2>/dev/null; then
     echo -e "${GREEN}SSH connection established successfully!${NC}"
@@ -98,109 +103,64 @@ else
 fi
 
 # ==============================================================================
-# Step 4: Prepare Remote Server (Install Dependencies)
+# Step 4: Git Clone or Pull on Remote Server
 # ==============================================================================
-echo -e "\n${YELLOW}[4/6] Preparing remote server...${NC}"
+echo -e "\n${YELLOW}[4/5] Syncing code via Git...${NC}"
 
-ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << 'REMOTE_SETUP'
+ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_GIT
 set -e
 
-echo "Updating system packages..."
-if command -v yum &> /dev/null; then
-    # Oracle Linux / RHEL / CentOS
-    sudo yum update -y
-    sudo yum install -y python3 python3-pip git unzip lsof
-elif command -v apt-get &> /dev/null; then
-    # Debian / Ubuntu
-    sudo apt-get update
-    sudo apt-get install -y python3 python3-pip python3-venv git unzip lsof
+# Ensure required directories exist
+mkdir -p logs dbbackups "generated reports"
+
+if [ -d "$REMOTE_APP_DIR/.git" ]; then
+    # Repository exists - pull latest changes
+    echo "Repository found. Pulling latest changes..."
+    cd $REMOTE_APP_DIR
+    git fetch origin
+    git reset --hard origin/$GIT_BRANCH
+    git clean -fd -e "logs/" -e "dbbackups/" -e "generated reports/" -e "venv/" -e "*.db" -e ".env"
+    echo "Code updated successfully!"
+else
+    # First time - clone the repository
+    echo "Cloning repository for the first time..."
+    
+    # Backup existing data if any
+    if [ -d "$REMOTE_APP_DIR" ]; then
+        echo "Backing up existing data..."
+        mkdir -p /tmp/sales-app-backup
+        cp -r $REMOTE_APP_DIR/logs /tmp/sales-app-backup/ 2>/dev/null || true
+        cp -r $REMOTE_APP_DIR/dbbackups /tmp/sales-app-backup/ 2>/dev/null || true
+        cp -r "$REMOTE_APP_DIR/generated reports" /tmp/sales-app-backup/ 2>/dev/null || true
+        cp $REMOTE_APP_DIR/*.db /tmp/sales-app-backup/ 2>/dev/null || true
+        cp $REMOTE_APP_DIR/.env /tmp/sales-app-backup/ 2>/dev/null || true
+        rm -rf $REMOTE_APP_DIR
+    fi
+    
+    git clone -b $GIT_BRANCH $GIT_REPO_URL $REMOTE_APP_DIR
+    cd $REMOTE_APP_DIR
+    
+    # Restore backed up data
+    if [ -d "/tmp/sales-app-backup" ]; then
+        echo "Restoring preserved data..."
+        cp -r /tmp/sales-app-backup/* . 2>/dev/null || true
+        rm -rf /tmp/sales-app-backup
+    fi
+    
+    echo "Repository cloned successfully!"
 fi
 
-# Ensure pip is up to date
-python3 -m pip install --upgrade pip 2>/dev/null || true
+# Ensure directories exist after git operations
+mkdir -p logs dbbackups "generated reports"
+chmod +x deployment/deploy.sh cronjobs/*.sh 2>/dev/null || true
+REMOTE_GIT
 
-# Open firewall port 8888 for the app
-echo "Configuring firewall to allow port 8888..."
-if command -v firewall-cmd &> /dev/null; then
-    # RHEL/CentOS/Oracle Linux (firewalld)
-    sudo firewall-cmd --permanent --add-port=8888/tcp 2>/dev/null || true
-    sudo firewall-cmd --reload 2>/dev/null || true
-    echo "Firewall port 8888 opened (firewalld)"
-elif command -v ufw &> /dev/null; then
-    # Ubuntu/Debian (ufw)
-    sudo ufw allow 8888/tcp 2>/dev/null || true
-    echo "Firewall port 8888 opened (ufw)"
-elif command -v iptables &> /dev/null; then
-    # Fallback to iptables
-    sudo iptables -A INPUT -p tcp --dport 8888 -j ACCEPT 2>/dev/null || true
-    echo "Firewall port 8888 opened (iptables)"
-fi
-
-echo "Server dependencies and firewall configured successfully!"
-REMOTE_SETUP
-
-echo -e "${GREEN}Remote server dependencies ready.${NC}"
+echo -e "${GREEN}Code synced via Git!${NC}"
 
 # ==============================================================================
-# Step 5: Upload Project Files
+# Step 5: Execute deploy.sh on Remote Server
 # ==============================================================================
-echo -e "\n${YELLOW}[5/6] Uploading project files...${NC}"
-
-# Create remote directory
-ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "mkdir -p $REMOTE_APP_DIR"
-
-# Create a temporary archive excluding unnecessary files
-ARCHIVE_NAME="sales-app-deploy.tar.gz"
-echo "Creating archive of project files..."
-
-# Files/folders to exclude from upload
-EXCLUDE_PATTERNS=(
-    "--exclude=.git"
-    "--exclude=__pycache__"
-    "--exclude=*.pyc"
-    "--exclude=venv"
-    "--exclude=.venv"
-    "--exclude=node_modules"
-    "--exclude=logs"
-    "--exclude=dbbackups"
-    "--exclude=generated reports"
-    # "--exclude=*.db"  <-- Allow DB Upload
-    "--exclude=.DS_Store"
-    "--exclude=serverkeys"
-    "--exclude=$ARCHIVE_NAME"
-)
-
-# Create archive from Project Root
-tar czf "$SCRIPT_DIR/$ARCHIVE_NAME" "${EXCLUDE_PATTERNS[@]}" -C "$PROJECT_ROOT" .
-
-echo "Uploading archive to server..."
-scp $SSH_OPTS "$SCRIPT_DIR/$ARCHIVE_NAME" "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP:$REMOTE_APP_DIR/"
-
-# Extract on remote server (clean old code first, preserve db and venv)
-ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_EXTRACT
-cd $REMOTE_APP_DIR
-
-echo "Cleaning old code files (preserving database, venv, logs, and backups)..."
-# Remove old code but keep database, venv, logs, backups, and archive
-find . -maxdepth 1 -type f ! -name "*.db" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
-rm -rf static templates .agent migrations backend deployment cronjobs 2>/dev/null || true
-
-echo "Extracting fresh code..."
-tar xzf $ARCHIVE_NAME
-rm -f $ARCHIVE_NAME
-chmod +x deployment/deploy.sh 2>/dev/null || true
-echo "Fresh code deployed successfully!"
-REMOTE_EXTRACT
-
-# Clean up local archive
-rm -f "$SCRIPT_DIR/$ARCHIVE_NAME"
-
-echo -e "${GREEN}Project files uploaded successfully!${NC}"
-
-# ==============================================================================
-# Step 6: Execute deploy.sh on Remote Server
-# ==============================================================================
-echo -e "\n${YELLOW}[6/6] Executing deployment on remote server...${NC}"
+echo -e "\n${YELLOW}[5/5] Executing deployment on remote server...${NC}"
 echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Native/SQLite).${NC}"
 echo ""
 
