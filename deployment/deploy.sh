@@ -17,6 +17,18 @@ RED='\033[0;31m'
 NC='\033[0m'
 echo -e "${GREEN}=== Sales App Automated Deployment ===${NC}"
 
+# Setup Logging
+mkdir -p logs
+LOG_FILE="logs/deployment.log"
+# Rotate old log
+if [ -f "$LOG_FILE" ]; then
+    mv "$LOG_FILE" "logs/deployment_$(date +%Y%m%d_%H%M%S).log"
+fi
+# Redirect stdout and stderr to log file and console
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "Deployment started at $(date)"
+
 # Helper: Check and Clean Port
 cleanup_port() {
     local p=$1

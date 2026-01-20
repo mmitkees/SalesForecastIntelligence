@@ -20,10 +20,11 @@ DB_FILE="$PROJECT_ROOT/sales_app_v3.db"
 BACKUP_DIR="$PROJECT_ROOT/dbbackups"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 BACKUP_FILE="${BACKUP_DIR}/sales_app_v3_${TIMESTAMP}.db"
-LOG_FILE="${BACKUP_DIR}/backup_log.txt"
+LOG_FILE="$PROJECT_ROOT/logs/backup_db.log"
 
-# Ensure backup directory exists
+# Ensure backup and log directories exist
 mkdir -p "$BACKUP_DIR"
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Perform Backup
 if [ -f "$DB_FILE" ]; then

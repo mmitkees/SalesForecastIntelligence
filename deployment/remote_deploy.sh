@@ -29,6 +29,18 @@ echo -e "${BLUE}╔════════════════════�
 echo -e "${BLUE}║      Sales App - Remote Deployment Script (Git-Based)        ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
 
+# Setup Logging
+mkdir -p "$PROJECT_ROOT/logs"
+LOG_FILE="$PROJECT_ROOT/logs/remote_deployment.log"
+# Rotate old log
+if [ -f "$LOG_FILE" ]; then
+    mv "$LOG_FILE" "$PROJECT_ROOT/logs/remote_deployment_$(date +%Y%m%d_%H%M%S).log"
+fi
+# Redirect stdout and stderr to log file and console
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "Remote deployment started at $(date)"
+
 # ==============================================================================
 # Step 1: Load Environment Configuration
 # ==============================================================================
