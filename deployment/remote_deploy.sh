@@ -156,8 +156,8 @@ echo -e "\n${YELLOW}[5/6] Syncing code via Git...${NC}"
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_GIT
 set -e
 
-# Ensure required directories exist
-mkdir -p logs dbbackups "generated reports"
+# Ensure required directories exist in APP DIR
+mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/dbbackups" "$REMOTE_APP_DIR/generated reports"
 
 if [ -d "$REMOTE_APP_DIR/.git" ]; then
     # Repository exists - pull latest changes
@@ -197,7 +197,7 @@ else
 fi
 
 # Ensure directories exist after git operations
-mkdir -p logs dbbackups "generated reports"
+mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/dbbackups" "$REMOTE_APP_DIR/generated reports"
 chmod +x deployment/deploy.sh cronjobs/*.sh 2>/dev/null || true
 REMOTE_GIT
 
