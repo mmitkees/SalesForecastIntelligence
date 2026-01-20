@@ -7,84 +7,101 @@ This application is a Sales Consumption Intelligence Dashboard built with Python
 
 ```
 /
-├── app.py                  # Main Flask application entry point. Handles API routes and business logic.
-├── models.py               # SQLAlchemy database models (Cluster, SalesRep, Workload, FiscalYear).
-├── start_app.sh            # Helper script to set up environment and start the application.
-├── sales_app_v3.db         # SQLite database file (Production data).
-├── Workload Seeder.xlsx    # CRITICAL: Excel template used for bulk uploading workloads in Admin panel.
-├── deployment/             # Deployment scripts and requirements.
-├── static/                 # Frontend assets.
-│   ├── css/
-│   │   └── style.css       # Main stylesheet.
-│   ├── js/
-│   │   ├── main.js             # Frontend router and initialization.
-│   │   ├── api.js              # API client wrapper.
-│   │   ├── state.js            # Global state management.
-│   │   ├── utils.js            # Formatting utilities.
-│   │   └── controllers/        # Logical controllers for views.
-│   │       ├── admin.js        # Admin panel logic (Clusters, Reps, Uploads).
-│   │       ├── dashboard.js    # Dashboard logic (Quarterly Breakdowns).
-│   │       └── workloads.js    # Workload management logic.
-│   └── views/              # HTML Partials for Single Page Application.
-│       ├── admin.html
-│       ├── dashboard.html
-│       └── workloads.html
-└── venv/                   # Python Virtual Environment (Local).
+├── backend/                # Flask application
+│   ├── app.py              # Main Flask application entry point
+│   ├── models.py           # SQLAlchemy database models
+│   └── ...                 # Other backend modules
+├── static/                 # Frontend assets
+│   ├── css/                # Stylesheets
+│   ├── js/                 # JavaScript modules
+│   │   ├── main.js         # Frontend router and initialization
+│   │   ├── api.js          # API client wrapper
+│   │   └── controllers/    # View controllers (dashboard, admin, workloads)
+│   └── views/              # HTML Partials for SPA
+├── deployment/             # Deployment scripts
+│   ├── deploy.sh           # Local/Remote deployment script
+│   ├── remote_deploy.sh    # Git-based remote deployment
+│   └── requirements.txt    # Python dependencies
+├── cronjobs/               # Scheduled tasks
+│   ├── backup_db.sh        # Database backup script
+│   └── crontab.txt         # Cron job definitions
+├── logs/                   # Application logs (gitignored)
+├── dbbackups/              # Database backups (gitignored)
+├── generated reports/      # Generated reports (gitignored)
+├── sales_app_v3.db         # SQLite database (Production data)
+├── .env                    # Environment configuration
+├── .env.example            # Environment template
+└── Workload Seeder.xlsx    # Excel template for bulk workload uploads
 ```
 
-## Automated Deployment (Recommended)
-You can use the `deployment/deploy.sh` script to automate set up, validation, and running the application as a native system service.
+## Deployment
+
+### Remote Deployment (Recommended)
+Deploy to your remote server using git-based deployment:
+
+```bash
+./deployment/remote_deploy.sh
+```
+
+This script:
+1. Creates a full backup of the remote app directory
+2. Pulls latest code from Git (preserving local data)
+3. Installs dependencies and configures services
+4. Installs cron jobs for scheduled backups
+
+### Local Deployment
+Run locally for development:
 
 ```bash
 ./deployment/deploy.sh
 ```
 
 Follow the interactive prompts to:
-1.  Select Database (**Local SQLite** or **Oracle ADB**).
-2.  Automatically configure system services (`systemd` for Linux, `launchd` for macOS).
+1. Select Database (**Local SQLite** or **Oracle ADB**)
+2. Configure system services (`systemd` for Linux, `launchd` for macOS)
 
 ---
 
-## Manual Execution (Legacy)
-
-## How to Run
+## Manual Development
 
 ### Prerequisites
 - Python 3.8+
-- Pip
-- Bash (for start script)
+- Git
 
-### Local Development
-1.  **Run the Start Script**:
-    ```bash
-    ./start_app.sh
-    ```
-    This script automatically:
-    - Creates a virtual environment (`venv`) if missing.
-    - Activates it.
-    - Installs dependencies from `requirements.txt`.
-    - Starts the Flask server on port 8080.
+### Quick Start
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r deployment/requirements.txt
+python backend/app.py
+```
 
-2.  **Manual Start**:
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r deployment/requirements.txt
-    python app.py
-    ```
+Access the app at: `http://localhost:8888`
 
-3.  **Access the App**:
-    Open `http://localhost:8080` in your browser.
+---
 
-### Features
-- **Dashboard**: View consumption data across Q1-Q4. Columns dynamically adjust based on the current month (Actuals vs Estimates). Simulation and Workload fields update totals in real-time.
-- **Workloads**: Add, Edit, and Manage workloads tagged to specific quarters.
-- **Admin**: Manage Clusters and Sales Reps. Bulk upload workloads using the **Workload Seeder.xlsx** template.
+## Configuration
 
-## Deployment Notes
-- For production, use a WSGI server like `gunicorn` instead of the development server.
-  ```bash
-  pip install gunicorn
-  gunicorn -w 4 -b 0.0.0.0:8080 app:app
-  ```
-- Ensure `sales_app_v3.db` is persistent or switch to a robust DB (PostgreSQL/Oracle) by setting `DATABASE_URL`.
+### Environment Variables (`.env`)
+```bash
+# Database
+DATABASE_URL=sqlite:///sales_app_v3.db
+PORT=8888
+
+# Remote Deployment
+REMOTE_SERVER_IP=129.151.159.172
+REMOTE_SERVER_USER=opc
+SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key
+REMOTE_APP_DIR=/home/opc/sales-app
+GIT_REPO_URL=https://github.com/mmitkees/SalesForecastIntelligence.git
+GIT_BRANCH=dev
+```
+
+---
+
+## Features
+- **Dashboard**: View consumption data across Q1-Q4 with real-time updates
+- **Workloads**: Add, Edit, and Manage workloads tagged to specific quarters
+- **Admin**: Manage Clusters and Sales Reps, bulk upload workloads
+- **Automated Backups**: Daily database backups via cron (2 AM)
+- **Pre-Deployment Backups**: Full app backup before each deployment
