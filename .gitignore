@@ -20,9 +20,7 @@ env/
 .DS_Store
 
 # Logs
-app.err
-app.log
-flask.log
+logs/
 
 # Note: .env is NOT ignored - it's needed for deployment configuration
 # Sensitive credentials should use .env.local which IS ignored

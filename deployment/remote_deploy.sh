@@ -161,7 +161,7 @@ EXCLUDE_PATTERNS=(
     "--exclude=venv"
     "--exclude=.venv"
     "--exclude=node_modules"
-    "--exclude=*.log"
+    "--exclude=logs"
     # "--exclude=*.db"  <-- Allow DB Upload
     "--exclude=.DS_Store"
     "--exclude=serverkeys"
@@ -180,7 +180,7 @@ cd $REMOTE_APP_DIR
 
 echo "Cleaning old code files (preserving database, venv, and logs)..."
 # Remove old code but keep database, venv, logs, and archive
-find . -maxdepth 1 -type f ! -name "*.db" ! -name "*.log" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
+find . -maxdepth 1 -type f ! -name "*.db" ! -name "$ARCHIVE_NAME" -delete 2>/dev/null || true
 rm -rf static templates .agent migrations backend deployment 2>/dev/null || true
 
 echo "Extracting fresh code..."

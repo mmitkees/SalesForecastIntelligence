@@ -178,9 +178,9 @@ if [ "$OS_TYPE" == "Darwin" ]; then
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>$WORK_DIR/app.log</string>
+    <string>$WORK_DIR/logs/app.log</string>
     <key>StandardErrorPath</key>
-    <string>$WORK_DIR/app.err</string>
+    <string>$WORK_DIR/logs/app.err</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>DATABASE_URL</key>
@@ -244,13 +244,13 @@ EOF
     else
         echo -e "${RED}Failed to install systemd service. Running manually...${NC}"
         rm -f "$TMP_SERVICE"
-        nohup $WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py > $WORK_DIR/app.log 2>&1 &
+        nohup $WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py > $WORK_DIR/logs/app.log 2>&1 &
         echo -e "${GREEN}App running manually with PID $!${NC}"
     fi
     
 else
     echo -e "${RED}Unsupported OS for auto-service creation. Running manually in background.${NC}"
-    nohup python backend/app.py > app.log 2>&1 &
+    nohup python backend/app.py > logs/app.log 2>&1 &
     echo -e "App running with PID $!"
 fi
 
