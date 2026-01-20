@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Configuration
 APP_NAME="sales-app"
 PORT=8888
