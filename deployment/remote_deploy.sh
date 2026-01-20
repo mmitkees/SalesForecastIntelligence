@@ -67,7 +67,7 @@ REMOTE_SERVER_USER="${REMOTE_SERVER_USER:-opc}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-serverkeys/ssh-key-2026-01-13.key}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/home/opc/sales-app}"
 GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/mmitkees/SalesForecastIntelligence.git}"
-GIT_BRANCH="${GIT_BRANCH:-dev}"
+GIT_BRANCH="${GIT_BRANCH:-prod}"
 
 # Resolve SSH key path (relative to project root)
 if [[ ! "$SSH_KEY_PATH" = /* ]]; then
