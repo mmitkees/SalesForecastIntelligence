@@ -12,7 +12,7 @@ This application is a Sales Consumption Intelligence Dashboard built with Python
 ├── start_app.sh            # Helper script to set up environment and start the application.
 ├── sales_app_v3.db         # SQLite database file (Production data).
 ├── Workload Seeder.xlsx    # CRITICAL: Excel template used for bulk uploading workloads in Admin panel.
-├── requirements.txt        # Python dependencies.
+├── deployment/             # Deployment scripts and requirements.
 ├── static/                 # Frontend assets.
 │   ├── css/
 │   │   └── style.css       # Main stylesheet.
@@ -69,7 +69,7 @@ Follow the interactive prompts to:
     ```bash
     python3 -m venv venv
     source venv/bin/activate
-    pip install -r requirements.txt
+    pip install -r deployment/requirements.txt
     python app.py
     ```
 

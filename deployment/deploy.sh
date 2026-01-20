@@ -150,7 +150,7 @@ cleanup_port $PORT
 echo -e "\n${GREEN}[3/4] Installing Python Dependencies...${NC}"
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r deployment/requirements.txt
 
 echo -e "\n${GREEN}[4/4] Creating System Service...${NC}"
 
