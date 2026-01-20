@@ -115,9 +115,17 @@ else
 fi
 
 # ==============================================================================
-# Step 4: Pre-Deployment Full Backup on Remote Server
+# Step 4: Configure Server Timezone
 # ==============================================================================
-echo -e "\n${YELLOW}[4/6] Running pre-deployment backup...${NC}"
+echo -e "\n${YELLOW}[4/7] Configuring Server Timezone...${NC}"
+SERVER_TIMEZONE="${SERVER_TIMEZONE:-Asia/Dubai}"
+
+ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" "sudo timedatectl set-timezone $SERVER_TIMEZONE && echo 'Timezone set to $SERVER_TIMEZONE' && date"
+
+# ==============================================================================
+# Step 5: Pre-Deployment Full Backup on Remote Server
+# ==============================================================================
+echo -e "\n${YELLOW}[5/7] Running pre-deployment backup...${NC}"
 
 ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << 'REMOTE_BACKUP'
 APP_DIR="$HOME/sales-app"
@@ -204,9 +212,9 @@ REMOTE_GIT
 echo -e "${GREEN}Code synced via Git!${NC}"
 
 # ==============================================================================
-# Step 6: Execute deploy.sh on Remote Server
+# Step 7: Execute deploy.sh on Remote Server
 # ==============================================================================
-echo -e "\n${YELLOW}[6/6] Executing deployment on remote server...${NC}"
+echo -e "\n${YELLOW}[7/7] Executing deployment on remote server...${NC}"
 echo -e "${YELLOW}Note: This will run deploy.sh non-interactively (Native/SQLite).${NC}"
 echo ""
 
