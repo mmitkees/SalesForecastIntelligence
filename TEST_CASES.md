@@ -67,4 +67,11 @@ This document outlines test cases for validating the application across differen
 | ID | Description | Expected Result |
 | :--- | :--- | :--- |
 | **SYS-GEN-01** | **Weekly Export**<br>Run `cron_jobs/run_weekly_export.sh` | Excel file created in `generated_reports/` with correct name format. |
-| **SYS-GEN-02** | **DB Backup**<br>Run `cron_jobs/backup_db.sh` | DB Backup created in `db_backups/`. |
+
+---
+
+## 6. Regression & Bug Fixes
+
+| ID | Description | Expected Result |
+| :--- | :--- | :--- |
+| **BUG-001** | **Workload Seeder Q2 Upload**<br>Upload an Excel file with Q2 data (Sep/Oct/Nov columns). | Workloads are created with correct `month_1`, `month_2`, `month_3` values and non-zero `total`. |

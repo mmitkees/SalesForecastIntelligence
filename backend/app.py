@@ -1295,10 +1295,10 @@ def upload_workloads():
                 except:
                     return 0.0
 
-            # Map Excel columns to monthly buckets
-            m1 = clean_money(get_val(['month 1', 'dec', 'december', 'mar', 'march', 'june', 'jun'], 0))
-            m2 = clean_money(get_val(['month 2', 'jan', 'january', 'apr', 'april', 'july', 'jul'], 0))
-            m3 = clean_money(get_val(['month 3', 'feb', 'february', 'may', 'august', 'aug'], 0))
+            # Map Excel columns to monthly buckets (Updated to include Q2: Sep/Oct/Nov)
+            m1 = clean_money(get_val(['month 1', 'dec', 'december', 'mar', 'march', 'june', 'jun', 'sep', 'september'], 0))
+            m2 = clean_money(get_val(['month 2', 'jan', 'january', 'apr', 'april', 'july', 'jul', 'oct', 'october'], 0))
+            m3 = clean_money(get_val(['month 3', 'feb', 'february', 'may', 'august', 'aug', 'nov', 'november'], 0))
 
             acct_name = str(get_val(['account name', 'account', 'customer', 'customer name'], 'Unknown'))
             f_type = str(get_val(['forecast type', 'forecast', 'type', 'stage'], 'Forecast'))
