@@ -8,4 +8,7 @@
 # ==============================================================================
 
 # Daily database backup at 2:00 AM
-0 2 * * * $APP_DIR/cronjobs/backup_db.sh >> $APP_DIR/logs/cron.log 2>&1
+0 2 * * * $APP_DIR/cron_jobs/backup_db.sh >> $APP_DIR/logs/cron.log 2>&1
+
+# Weekly Workload Export - Every Friday at 18:00 (6 PM)
+0 18 * * 5 $APP_DIR/cron_jobs/run_weekly_export.sh >> $APP_DIR/logs/weekly_export_cron.log 2>&1
