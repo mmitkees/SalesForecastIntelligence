@@ -10,24 +10,44 @@ This application is a Sales Consumption Intelligence Dashboard built with Python
 ├── backend/                # Flask application
 │   ├── app.py              # Main Flask application entry point
 │   ├── models.py           # SQLAlchemy database models
-│   └── ...                 # Other backend modules
+│   ├── weekly_export.py    # Weekly workload export logic
+│   ├── init_rbac.py        # Initialize Role-Based Access Control
+│   ├── rename_fy_fields.py # Utility to rename fiscal year fields
+│   ├── restructure_quarters.py # Utility to restructure quarter data
+│   ├── remove_unused_fields.py # Helper to clean up database fields
+│   └── __init__.py         # Package initializer
 ├── static/                 # Frontend assets
-│   ├── css/                # Stylesheets
-│   ├── js/                 # JavaScript modules
+│   ├── css/
+│   │   └── styles.css      # Global application styles
+│   ├── js/
 │   │   ├── main.js         # Frontend router and initialization
 │   │   ├── api.js          # API client wrapper
-│   │   └── controllers/    # View controllers (dashboard, admin, workloads)
+│   │   ├── state.js        # Global state management
+│   │   ├── utils.js        # Formatting and utility functions
+│   │   └── controllers/
+│   │       ├── dashboard.js # Dashboard view controller
+│   │       ├── workloads.js # Workloads view controller
+│   │       ├── admin.js     # Admin view controller
+│   │       └── analytics.js # Analytics view controller
 │   └── views/              # HTML Partials for SPA
+│       ├── dashboard.html  # Dashboard view template
+│       ├── workloads.html  # Workloads view template
+│       ├── admin.html      # Admin view template
+│       └── analytics.html  # Analytics view template
+│   ├── index.html          # Main SPA entry HTML
+│   ├── login.html          # Login page HTML
+│   └── favicon.svg         # Site icon
 ├── deployment/             # Deployment scripts
 │   ├── deploy.sh           # Local/Remote deployment script
 │   ├── remote_deploy.sh    # Git-based remote deployment
 │   └── requirements.txt    # Python dependencies
-├── cronjobs/               # Scheduled tasks
+├── cron_jobs/              # Scheduled tasks
 │   ├── backup_db.sh        # Database backup script
+│   ├── run_weekly_export.sh # Weekly export job wrapper
 │   └── crontab.txt         # Cron job definitions
 ├── logs/                   # Application logs (gitignored)
-├── dbbackups/              # Database backups (gitignored)
-├── generated reports/      # Generated reports (gitignored)
+├── db_backups/             # Database backups (gitignored)
+├── generated_reports/      # Generated reports (gitignored)
 ├── sales_app_v3.db         # SQLite database (Production data)
 ├── .env                    # Environment configuration
 ├── .env.example            # Environment template

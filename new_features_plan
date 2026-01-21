@@ -1,0 +1,17 @@
+beta 
+-----
+
+1- i want corn job for reports
+every end of Friday run a job to export excel sheet of the workloads  table for current quarter from all clusters all concatinated
+i want excel of same format when i press the  current export workload button on workload table , just need to concate all clusters in one excel sheet one table
+implment error handling if cluster have no workloads of current quarter
+
+
+
+History
+wl description
+pending on ( Oracle , Customer )
+what is required to close
+automation with spa
+analytics with abdul
+

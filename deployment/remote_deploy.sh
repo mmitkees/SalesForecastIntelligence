@@ -51,7 +51,7 @@ if [ ! -f "$ENV_FILE" ]; then
     echo -e "${YELLOW}Please create .env file in project root with the following variables:${NC}"
     echo -e "  REMOTE_SERVER_IP=129.151.159.172"
     echo -e "  REMOTE_SERVER_USER=opc"
-    echo -e "  SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key"
+    echo -e "  SSH_KEY_PATH=server_keys/ssh-key-2026-01-13.key"
     echo -e "  REMOTE_APP_DIR=/home/opc/sales-app"
     echo -e "  GIT_REPO_URL=https://github.com/mmitkees/SalesForecastIntelligence.git"
     echo -e "  GIT_BRANCH=prod"
@@ -64,7 +64,7 @@ source "$ENV_FILE"
 # Set defaults if not provided
 REMOTE_SERVER_IP="${REMOTE_SERVER_IP:-129.151.159.172}"
 REMOTE_SERVER_USER="${REMOTE_SERVER_USER:-opc}"
-SSH_KEY_PATH="${SSH_KEY_PATH:-serverkeys/ssh-key-2026-01-13.key}"
+SSH_KEY_PATH="${SSH_KEY_PATH:-server_keys/ssh-key-2026-01-13.key}"
 REMOTE_APP_DIR="${REMOTE_APP_DIR:-/home/opc/sales-app}"
 GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/mmitkees/SalesForecastIntelligence.git}"
 GIT_BRANCH="${GIT_BRANCH:-prod}"
@@ -165,7 +165,7 @@ ssh $SSH_OPTS "$REMOTE_SERVER_USER@$REMOTE_SERVER_IP" << REMOTE_GIT
 set -e
 
 # Ensure required directories exist in APP DIR
-mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/dbbackups" "$REMOTE_APP_DIR/generated reports"
+mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/db_backups" "$REMOTE_APP_DIR/generated_reports"
 
 if [ -d "$REMOTE_APP_DIR/.git" ]; then
     # Repository exists - pull latest changes
@@ -173,7 +173,7 @@ if [ -d "$REMOTE_APP_DIR/.git" ]; then
     cd $REMOTE_APP_DIR
     git fetch origin
     git reset --hard origin/$GIT_BRANCH
-    git clean -fd -e "logs/" -e "dbbackups/" -e "generated reports/" -e "venv/" -e "*.db" -e ".env"
+    git clean -fd -e "logs/" -e "db_backups/" -e "generated_reports/" -e "venv/" -e "*.db" -e ".env"
     echo "Code updated successfully!"
 else
     # First time - clone the repository
@@ -184,8 +184,8 @@ else
         echo "Backing up existing data..."
         mkdir -p /tmp/sales-app-backup
         cp -r $REMOTE_APP_DIR/logs /tmp/sales-app-backup/ 2>/dev/null || true
-        cp -r $REMOTE_APP_DIR/dbbackups /tmp/sales-app-backup/ 2>/dev/null || true
-        cp -r "$REMOTE_APP_DIR/generated reports" /tmp/sales-app-backup/ 2>/dev/null || true
+        cp -r $REMOTE_APP_DIR/db_backups /tmp/sales-app-backup/ 2>/dev/null || true
+        cp -r "$REMOTE_APP_DIR/generated_reports" /tmp/sales-app-backup/ 2>/dev/null || true
         cp $REMOTE_APP_DIR/*.db /tmp/sales-app-backup/ 2>/dev/null || true
         cp $REMOTE_APP_DIR/.env /tmp/sales-app-backup/ 2>/dev/null || true
         rm -rf $REMOTE_APP_DIR
@@ -205,8 +205,8 @@ else
 fi
 
 # Ensure directories exist after git operations
-mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/dbbackups" "$REMOTE_APP_DIR/generated reports"
-chmod +x deployment/deploy.sh cronjobs/*.sh 2>/dev/null || true
+mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/db_backups" "$REMOTE_APP_DIR/generated_reports"
+chmod +x deployment/deploy.sh cron_jobs/*.sh 2>/dev/null || true
 REMOTE_GIT
 
 echo -e "${GREEN}Code synced via Git!${NC}"
