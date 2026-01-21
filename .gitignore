@@ -9,7 +9,7 @@ venv/
 env/
 
 # SQLite database
-#.db
+.db
 *.sqlite
 
 # IDE
