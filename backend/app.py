@@ -1081,14 +1081,13 @@ def calculate_future_estimates(rep, partial_data_date=None):
             est = rep.current_daily_rate * days_in_month
             setattr(rep, field_name, est)
         
-        # --- CURRENT MONTH: Use partial_data_date ---
+        # --- CURRENT MONTH: Calculate estimate but DON'T overwrite actual ---
         elif month_start <= today <= month_end:
             passed_days = reference_date.day
             remaining_days = days_in_month - passed_days + 0.5
             current_actual = getattr(rep, field_name) or 0.0
-            est = current_actual + (rep.current_daily_rate * remaining_days)
-            setattr(rep, field_name, est)
-            rep.current_month_est = est
+            # Only set the estimate field, NOT the actual month field
+            rep.current_month_est = current_actual + (rep.current_daily_rate * remaining_days)
         
         # --- PAST MONTH: Do nothing (retain manual actuals) ---
 
