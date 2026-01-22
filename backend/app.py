@@ -861,7 +861,9 @@ def get_workloads():
                 "customer_type": w.customer_type,
                 "workload_type": w.workload_type,
                 "country": w.country,
-                "comments": w.comments,
+                "country": w.country,
+                "workload_details": w.comments,  # Alias for frontend
+                "comments": w.comments,          # Keep for backward compatibility
                 "opt_id": w.opt_id,
                 "quarter": w.quarter,
                 "month_1_amt": w.month_1_amt,
@@ -888,7 +890,9 @@ def get_workloads():
         "customer_type": w.customer_type,
         "workload_type": w.workload_type,
         "country": w.country,
-        "comments": w.comments,
+        "country": w.country,
+        "workload_details": w.comments,  # Alias for frontend
+        "comments": w.comments,          # Keep for backward compatibility
         "opt_id": w.opt_id,
         "quarter": w.quarter,
         "month_1_amt": w.month_1_amt,
@@ -928,7 +932,7 @@ def create_workload():
         customer_type=data['customer_type'],
         workload_type=data.get('workload_type', ''),
         country=data.get('country', ''),
-        comments=data.get('comments', ''),
+        comments=data.get('workload_details') or data.get('comments', ''),
         opt_id=data.get('opt_id', ''),
         quarter=quarter,
         month_1_amt=month_1,
@@ -972,7 +976,7 @@ def update_workload(workload_id):
     workload.customer_type = data.get('customer_type', workload.customer_type)
     workload.workload_type = data.get('workload_type', workload.workload_type)
     workload.country = data.get('country', workload.country)
-    workload.comments = data.get('comments', workload.comments)
+    workload.comments = data.get('workload_details') or data.get('comments', workload.comments)
     workload.opt_id = data.get('opt_id', workload.opt_id)
     workload.month_1_amt = float(data.get('month_1_amt', workload.month_1_amt))
     workload.month_2_amt = float(data.get('month_2_amt', workload.month_2_amt))
@@ -1083,7 +1087,11 @@ def calculate_future_estimates(rep, partial_data_date=None):
         
         # --- CURRENT MONTH: Calculate estimate but DON'T overwrite actual ---
         elif month_start <= today <= month_end:
-            passed_days = reference_date.day
+            # Only use partial_data_date if it's in the current month
+            if reference_date.month == today.month and reference_date.year == today.year:
+                passed_days = reference_date.day
+            else:
+                passed_days = today.day  # Fallback to today if partial_data_date is outdated
             remaining_days = days_in_month - passed_days + 0.5
             current_actual = getattr(rep, field_name) or 0.0
             # Only set the estimate field, NOT the actual month field
@@ -1139,10 +1147,20 @@ def update_from_workloads(rep, db):
             sums[q]['forecast'] += amount
 
     # --- 3. Automate Quarterly Exits from Monthly Fields ---
-    rep.q1_exit = (rep.jun or 0) + (rep.jul or 0) + (rep.aug or 0)
-    rep.q2_exit = (rep.sep or 0) + (rep.oct or 0) + (rep.nov or 0)
-    rep.q3_exit = (rep.dec or 0) + (rep.jan or 0) + (rep.feb or 0)
-    rep.q4_exit = (rep.mar or 0) + (rep.apr or 0) + (rep.may or 0)
+    # For current quarter: use current_month_est for current month
+    today = date.today()
+    current_month = today.month
+    
+    # Determine which month field to use for current month (est vs actual)
+    def get_month_value(month_idx, field_name):
+        if month_idx == current_month:
+            return rep.current_month_est or getattr(rep, field_name) or 0
+        return getattr(rep, field_name) or 0
+    
+    rep.q1_exit = get_month_value(6, 'jun') + get_month_value(7, 'jul') + get_month_value(8, 'aug')
+    rep.q2_exit = get_month_value(9, 'sep') + get_month_value(10, 'oct') + get_month_value(11, 'nov')
+    rep.q3_exit = get_month_value(12, 'dec') + get_month_value(1, 'jan') + get_month_value(2, 'feb')
+    rep.q4_exit = get_month_value(3, 'mar') + get_month_value(4, 'apr') + get_month_value(5, 'may')
     
     # Apply Simulation to Current and Next Quarter only
     for q in [current_q, next_q]:
@@ -1294,7 +1312,7 @@ def upload_workloads():
                 'customer_type': str(get_val(['customer type', 'customer_type'], 'Existing')),
                 'workload_type': str(get_val(['workload type', 'wl type', 'workload'], '')),
                 'country': str(get_val(['country'], '')),
-                'comments': str(get_val(['comments', 'comment', 'note', 'notes'], '')),
+                'comments': str(get_val(['workload details', 'details', 'comments', 'comment', 'note', 'notes'], '')),
                 'opt_id': opt_id_val,
                 'quarter': quarter,
                 'month_1_amt': m1,

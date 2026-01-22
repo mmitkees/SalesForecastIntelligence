@@ -7,8 +7,8 @@ import { fetchWorkloads, fetchSalesReps, updateWorkload, deleteWorkload, createW
 import { formatCurrency, deriveQuarter, showAlert, showConfirm } from '../utils.js';
 import { state, setState } from '../state.js';
 
-/** @type {number|null} Track the workload ID for the currently open comments modal */
-let currentCommentsWorkloadId = null;
+/** @type {number|null} Track the workload ID for the currently open details modal */
+let currentDetailsWorkloadId = null;
 
 /**
  * Initializes workload data and filters.
@@ -257,9 +257,9 @@ function renderWorkloadTable(data, tbodyId, quarter) {
             <td class="total-col"><strong>${formatCurrency(w.total_amount)}</strong></td>
             
             <td>
-                <button class="comment-icon-btn ${w.comments ? 'has-comment' : ''}" 
-                        onclick="openCommentsModal(${w.id}, '${w.account_name}')" 
-                        title="${w.comments || 'Add comment'}">
+                <button class="comment-icon-btn ${w.workload_details ? 'has-comment' : ''}" 
+                        onclick="openWorkloadDetailsModal(${w.id}, '${w.account_name}')" 
+                        title="${w.workload_details || 'Add details'}">
                     💬
                 </button>
             </td>
@@ -389,7 +389,7 @@ export async function handleFormSubmit(e) {
         forecast_type: document.getElementById('wl-forecast-type').value,
         customer_type: document.getElementById('wl-customer-type').value,
         workload_type: document.getElementById('wl-workload-type').value,
-        comments: document.getElementById('wl-comments').value,
+        workload_details: document.getElementById('wl-comments').value,
         consumption_start_date: document.getElementById('wl-start-date').value,
         month_1_amt: parseFloat(document.getElementById('wl-month-1').value) || 0,
         month_2_amt: parseFloat(document.getElementById('wl-month-2').value) || 0,
@@ -529,10 +529,10 @@ window.removeWorkload = async function (id) {
 };
 
 /**
- * Opens the comments modal.
+ * Opens the workload details modal.
  */
-window.openCommentsModal = function (workloadId, accountName) {
-    currentCommentsWorkloadId = workloadId;
+window.openWorkloadDetailsModal = function (workloadId, accountName) {
+    currentDetailsWorkloadId = workloadId;
     const workload = state.workloads.find(w => w.id === workloadId);
 
     const modal = document.getElementById('comments-modal');
@@ -540,8 +540,8 @@ window.openCommentsModal = function (workloadId, accountName) {
     const textarea = document.getElementById('comments-modal-text');
 
     if (modal && title && textarea) {
-        title.textContent = `Comments - ${accountName}`;
-        textarea.value = workload?.comments || '';
+        title.textContent = `Workload Details - ${accountName}`;
+        textarea.value = workload?.workload_details || '';
         modal.classList.add('active');
         textarea.focus();
     }
@@ -608,7 +608,7 @@ window.exportQuarterWorkloadToExcel = function (quarter, event) {
         'Month 2': w.month_2_amt,
         'Month 3': w.month_3_amt,
         'Total': w.total_amount,
-        'Comments': w.comments
+        'Workload Details': w.workload_details
     }));
 
     // Get cluster name from dropdown
@@ -661,30 +661,30 @@ document.addEventListener('click', (e) => {
     if (e.target.id === 'close-comments-modal' || e.target.id === 'cancel-comments-modal') {
         const modal = document.getElementById('comments-modal');
         if (modal) modal.classList.remove('active');
-        currentCommentsWorkloadId = null;
+        currentDetailsWorkloadId = null;
     }
     if (e.target.id === 'save-comments-modal') {
-        saveComments();
+        saveWorkloadDetails();
     }
     if (e.target.id === 'comments-modal') {
         const modal = document.getElementById('comments-modal');
         if (modal) modal.classList.remove('active');
-        currentCommentsWorkloadId = null;
+        currentDetailsWorkloadId = null;
     }
 });
 
 /**
- * Saves comments from the modal.
+ * Saves workload details from the modal.
  */
-async function saveComments() {
-    if (!currentCommentsWorkloadId) return;
+async function saveWorkloadDetails() {
+    if (!currentDetailsWorkloadId) return;
     const textarea = document.getElementById('comments-modal-text');
-    const comments = textarea.value;
-    await window.handleInlineEdit(currentCommentsWorkloadId, 'comments', comments);
+    const details = textarea.value;
+    await window.handleInlineEdit(currentDetailsWorkloadId, 'workload_details', details);
 
     const modal = document.getElementById('comments-modal');
     if (modal) modal.classList.remove('active');
-    currentCommentsWorkloadId = null;
+    currentDetailsWorkloadId = null;
 }
 
 /**

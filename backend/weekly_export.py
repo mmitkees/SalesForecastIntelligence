@@ -126,7 +126,7 @@ def export_workloads():
 
         df = pd.DataFrame(data, columns=[
             'Forecast', 'Account', 'Rep', 'Country', 'Type', 'Workload', 
-            'Opt-ID', 'Start', 'Month 1', 'Month 2', 'Month 3', 'Total', 'Comments'
+            'Opt-ID', 'Start', 'Month 1', 'Month 2', 'Month 3', 'Total', 'Workload Details'
         ])
         
         # Generate Filename
