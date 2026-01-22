@@ -204,12 +204,24 @@ function renderSection(q, reps, config) {
     let partialDay = 0, daysInMonth = 0;
 
     if (partialDateStr) {
-        const parts = partialDateStr.split('/');
-        const pd = parts.length === 3 ? new Date(parts[2], parts[1] - 1, parts[0]) : new Date(partialDateStr);
+        const parts = partialDateStr.split('-');
+        // Handle YYYY-MM-DD format (typical from backend API)
+        const pd = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(partialDateStr);
+
         if (!isNaN(pd.getTime())) {
-            partialDay = pd.getDate();
+            // Only use partial day if it's in the current month/year
+            const now = new Date();
+            if (pd.getMonth() === now.getMonth() && pd.getFullYear() === now.getFullYear()) {
+                partialDay = pd.getDate();
+            } else {
+                partialDay = now.getDate(); // Fallback to today
+            }
             daysInMonth = new Date(new Date().getFullYear(), currM + 1, 0).getDate();
         }
+    } else {
+        // Fallback to today if no date provided
+        partialDay = new Date().getDate();
+        daysInMonth = new Date(new Date().getFullYear(), currM + 1, 0).getDate();
     }
 
     // 1. Recalculate Current Month Estimate
