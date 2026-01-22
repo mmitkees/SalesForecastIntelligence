@@ -178,6 +178,7 @@ function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
         fields.qQoQ = 'q3_qoq_pct'; fields.addFct = 'q3_add_fct'; fields.totalExit = 'q3_total_exit_with_fc'; fields.qoqPlusFct = 'qoq_plus_fct_pct'; fields.upside = 'q3_add_upside';
     } else if (q === 'q4') {
         fields.prevExit = 'q3_total_exit_with_fc'; fields.prevQoQ = 'qoq_plus_fct_pct'; fields.qEst = 'q4_exit';
+        fields.qQoQ = 'q4_qoq_pct'; // Added missing field
         fields.addFct = 'q4_add_fct'; fields.totalExit = 'q4_total_exit_with_fc'; fields.qoqPlusFct = 'q4_qoq_plus_fct_pct'; fields.upside = 'q4_add_upside';
     }
 
