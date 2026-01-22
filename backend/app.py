@@ -1030,60 +1030,70 @@ def delete_workload(workload_id):
 def calculate_future_estimates(rep, partial_data_date=None):
     """
     Project future monthly totals based on the Current Daily Rate.
-    Strictly updates the individual monthly fields (jan, feb, etc.).
+    
+    Logic:
+    - Past Months: Unchanged (manually entered actuals)
+    - Current Month: Use partial_data_date for partial calculation
+    - Future Months: Simple calculation = Daily Rate × Days in Month
     """
     import calendar
-    from datetime import date, datetime
+    from datetime import date
     
     if not rep.current_daily_rate:
         return
 
-    # Determine reference date
-    reference_date = date.today()
+    today = date.today()
+    
+    # Parse partial_data_date for current month calculation
+    reference_date = today
     if partial_data_date:
         try:
+            from dateutil import parser
             if isinstance(partial_data_date, str):
-                from dateutil import parser
                 reference_date = parser.parse(partial_data_date).date()
             else:
                 reference_date = partial_data_date
         except:
             pass
-
-    current_month_idx = reference_date.month 
-    current_year = reference_date.year
     
     month_map = {
         1: 'jan', 2: 'feb', 3: 'mar', 4: 'apr', 5: 'may', 6: 'jun',
         7: 'jul', 8: 'aug', 9: 'sep', 10: 'oct', 11: 'nov', 12: 'dec'
     }
     
+    current_year = today.year
+    current_month_idx = today.month
+    
     for m_idx, field_name in month_map.items():
         # Align FY months with Calendar Years
         target_year = current_year
-        if current_month_idx >= 6: # First Half of FY (June-Dec)
-             if m_idx < 6: target_year += 1
-        else: # Second Half of FY (Jan-May)
-             if m_idx >= 6: target_year -= 1
+        if current_month_idx >= 6:  # First Half of FY (June-Dec)
+            if m_idx < 6: target_year += 1
+        else:  # Second Half of FY (Jan-May)
+            if m_idx >= 6: target_year -= 1
             
         month_start = date(target_year, m_idx, 1)
         days_in_month = calendar.monthrange(target_year, m_idx)[1]
         month_end = date(target_year, m_idx, days_in_month)
         
-        # Future Month: Full Projection
-        if reference_date < month_start:
-             est = rep.current_daily_rate * days_in_month
-             setattr(rep, field_name, est)
-             
-        # Current/Partial Month: formula logic
-        elif month_start <= reference_date <= month_end:
-             passed_days = reference_date.day
-             remaining_days = days_in_month - passed_days
-             current_actual = getattr(rep, field_name) or 0.0
-             est = current_actual + (rep.current_daily_rate * remaining_days)
-             setattr(rep, field_name, est)
-             if m_idx == current_month_idx:
-                 rep.current_month_est = est
+        # --- FUTURE MONTH: Simple projection ---
+        if today < month_start:
+            est = rep.current_daily_rate * days_in_month
+            setattr(rep, field_name, est)
+        
+        # --- CURRENT MONTH: Use partial_data_date ---
+        elif month_start <= today <= month_end:
+            passed_days = reference_date.day
+            remaining_days = days_in_month - passed_days + 0.5
+            current_actual = getattr(rep, field_name) or 0.0
+            est = current_actual + (rep.current_daily_rate * remaining_days)
+            setattr(rep, field_name, est)
+            rep.current_month_est = est
+        
+        # --- PAST MONTH: Do nothing (retain manual actuals) ---
+
+
+
 
 
 def update_from_workloads(rep, db):
