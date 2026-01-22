@@ -784,26 +784,15 @@ def update_sales_rep(rep_id):
     rep.current_month_est = safe_float(data.get('current_month_est', rep.current_month_est))
     
     # --- Step 3: Run Estimation Engine ---
-    # Calculated future months based on the new daily rate
     # Fetch cluster context for partial data logic
     cluster = rep.cluster or db.query(Cluster).filter(Cluster.id == rep.cluster_id).first()
     p_date = cluster.partial_data_date if cluster else None
+    
+    # Projection: Updates individual months based on daily rate
     calculate_future_estimates(rep, p_date)
     
-    # --- Step 4: Final Workload Aggregation ---
-    # This ensures that if Workloads exist, they overwrite manual edits to forecast fields
+    # Aggregation: Sums monthly fields into quarterly exit values and adds workloads
     update_from_workloads(rep, db)
-
-    # --- Step 5: Finalize Derived Totals ---
-    
-    # Q3 Estimated = Dec Actual + Jan Est + Feb Est + Manual Simulation
-    rep.q3_exit = rep.dec + rep.jan + rep.feb + rep.simulation
-    
-    # Calculate "Exit with Forecast" (The primary performance metric)
-    rep.q1_total_exit_with_fc = rep.q1_exit + rep.q1_add_fct
-    rep.q2_total_exit_with_fc = rep.q2_exit + rep.q2_add_fct
-    rep.q3_total_exit_with_fc = rep.q3_exit + rep.q3_add_fct
-    rep.q4_total_exit_with_fc = rep.q4_exit + rep.q4_add_fct
 
     db.commit()
     
@@ -1041,20 +1030,11 @@ def delete_workload(workload_id):
 def calculate_future_estimates(rep, partial_data_date=None):
     """
     Project future monthly totals based on the Current Daily Rate.
-    
-    Business Logic:
-    - Reference Date: Use partial_data_date if provided, else date.today().
-    - Future months (Start Date > Reference Date): 
-        - Estimate = Current Daily Rate * Days in Month
-    - Current/Partial Month (Reference Date falls in it):
-        - Remaining Days = Days in Month - Reference Day
-        - Estimate = Existing Actual + (Current Daily Rate * Remaining Days)
-    - Past Months: Retain existing values (Actuals).
+    Strictly updates the individual monthly fields (jan, feb, etc.).
     """
     import calendar
     from datetime import date, datetime
     
-    # If no rate is defined, we cannot project
     if not rep.current_daily_rate:
         return
 
@@ -1062,67 +1042,46 @@ def calculate_future_estimates(rep, partial_data_date=None):
     reference_date = date.today()
     if partial_data_date:
         try:
-            # Try parsing various formats if needed, assuming YYYY-MM-DD from frontend/db
-            reference_date = datetime.strptime(str(partial_data_date), "%Y-%m-%d").date()
-        except (ValueError, TypeError):
-            pass # Fallback to today if invalid format
+            if isinstance(partial_data_date, str):
+                from dateutil import parser
+                reference_date = parser.parse(partial_data_date).date()
+            else:
+                reference_date = partial_data_date
+        except:
+            pass
 
     current_month_idx = reference_date.month 
     current_year = reference_date.year
     
-    # Map month indices to database column names
     month_map = {
         1: 'jan', 2: 'feb', 3: 'mar', 4: 'apr', 5: 'may', 6: 'jun',
         7: 'jul', 8: 'aug', 9: 'sep', 10: 'oct', 11: 'nov', 12: 'dec'
     }
     
     for m_idx, field_name in month_map.items():
-        # --- Robust Future Determination ---
-        # Fiscal Year Context: FY ends May 31.
-        # We determine the calendar year of the month field relative to current reference date logic?
-        # Actually simpler: Just determine the absolute date of this target month relative to reference.
-        
-        # Heuristic to align FY months with Calendar Years based on reference date
+        # Align FY months with Calendar Years
         target_year = current_year
-        
-        # FY26 spans Jun 2025 to May 2026.
-        # If reference is Jan 2026. 
-        #   Jan-May -> 2026 (same year)
-        #   Jun-Dec -> 2025 (prev year)
-        # If reference is Oct 2025.
-        #   Jan-May -> 2026 (next year)
-        #   Jun-Dec -> 2025 (same year)
-        
-        if current_month_idx >= 6: # Currently in First Half of FY (e.g. Oct 2025)
-             if m_idx < 6: target_year += 1 # Jan-May are next year
-        else: # Currently in Second Half of FY (e.g. Feb 2026)
-             if m_idx >= 6: target_year -= 1 # Jun-Dec are prev year
+        if current_month_idx >= 6: # First Half of FY (June-Dec)
+             if m_idx < 6: target_year += 1
+        else: # Second Half of FY (Jan-May)
+             if m_idx >= 6: target_year -= 1
             
         month_start = date(target_year, m_idx, 1)
-        # End of the target month
         days_in_month = calendar.monthrange(target_year, m_idx)[1]
         month_end = date(target_year, m_idx, days_in_month)
         
-        # Logic 1: Strictly Future Month (Reference Date is before this month started)
+        # Future Month: Full Projection
         if reference_date < month_start:
-             # Full Projection
              est = rep.current_daily_rate * days_in_month
              setattr(rep, field_name, est)
              
-        # Logic 2: Current/Partial Month (Reference Date is inside this month)
+        # Current/Partial Month: formula logic
         elif month_start <= reference_date <= month_end:
              passed_days = reference_date.day
              remaining_days = days_in_month - passed_days
-             
-             # Current actual value (or 0 if None)
              current_actual = getattr(rep, field_name) or 0.0
-             
-             # Formula: Current Actual + (Daily Rate * Remaining Days)
              est = current_actual + (rep.current_daily_rate * remaining_days)
              setattr(rep, field_name, est)
-             
-             # Also update the specific helper field for current month estimate if it matches
-             # (This is redundant but often requested for UI display)
              if m_idx == current_month_idx:
                  rep.current_month_est = est
 
@@ -1130,60 +1089,65 @@ def calculate_future_estimates(rep, partial_data_date=None):
 def update_from_workloads(rep, db):
     """
     Synchronizes the Sales Rep summary fields with the aggregate data from their Workloads.
-    
-    Logic:
-    - Sums all 'Forecast' types (Commit, Pipeline, etc.) into 'Add FCT' columns.
-    - Sums all 'Upside' types into 'Add Upside' columns.
-    - Separates totals by fiscal quarter.
-    - Updates derived 'Total Exit with Forecast' fields.
+    Also automates quarterly Exit values based on monthly fields and simulation logic.
     """
-    # Initialize separate buckets for total aggregation
-    sums = {
-        'q1': {'forecast': 0.0, 'upside': 0.0},
-        'q2': {'forecast': 0.0, 'upside': 0.0},
-        'q3': {'forecast': 0.0, 'upside': 0.0},
-        'q4': {'forecast': 0.0, 'upside': 0.0}
-    }
+    from datetime import date
     
-    # Iterate through each deal associated with the rep
+    # --- 1. Identify Context (Current/Next Quarter) ---
+    cluster = rep.cluster or db.query(Cluster).filter(Cluster.id == rep.cluster_id).first()
+    p_date = cluster.partial_data_date if cluster else None
+    
+    reference_date = date.today()
+    if p_date:
+        try:
+            from dateutil import parser
+            reference_date = parser.parse(p_date).date()
+        except:
+            pass
+            
+    # Derive Current Quarter (June Start)
+    m = reference_date.month
+    if m in [6, 7, 8]: current_q = 'q1'
+    elif m in [9, 10, 11]: current_q = 'q2'
+    elif m in [12, 1, 2]: current_q = 'q3'
+    else: current_q = 'q4'
+    
+    # Derive Next Quarter
+    q_order = ['q1', 'q2', 'q3', 'q4']
+    curr_idx = q_order.index(current_q)
+    next_q = q_order[(curr_idx + 1) % 4]
+
+    # --- 2. Aggregate Workloads ---
+    sums = {q: {'forecast': 0.0, 'upside': 0.0} for q in q_order}
     for w in rep.workloads:
-        q = w.quarter.lower() # Normalize to q1, q2...
+        q = w.quarter.lower()
         if q not in sums: continue
-        
-        # Categorization Logic
         ftype = w.forecast_type.lower()
         amount = w.total_amount
-        
         if 'upside' in ftype:
             sums[q]['upside'] += amount
         elif any(keyword in ftype for keyword in ['forecast', 'fct', 'commit', 'pipeline']):
-            # These deals represent expected (forecasted) additions to the baseline exit
             sums[q]['forecast'] += amount
-        else:
-            # Skip 'Won' or 'Closed' deals as they are assumed to be reflected in actuals
-            pass
 
-    # --- Persist aggregated values to the SalesRep model ---
-    rep.q1_add_fct = sums['q1']['forecast']
-    rep.q1_add_upside = sums['q1']['upside']
+    # --- 3. Automate Quarterly Exits from Monthly Fields ---
+    rep.q1_exit = (rep.jun or 0) + (rep.jul or 0) + (rep.aug or 0)
+    rep.q2_exit = (rep.sep or 0) + (rep.oct or 0) + (rep.nov or 0)
+    rep.q3_exit = (rep.dec or 0) + (rep.jan or 0) + (rep.feb or 0)
+    rep.q4_exit = (rep.mar or 0) + (rep.apr or 0) + (rep.may or 0)
     
-    rep.q2_add_fct = sums['q2']['forecast']
-    rep.q2_add_upside = sums['q2']['upside']
+    # Apply Simulation to Current and Next Quarter only
+    for q in [current_q, next_q]:
+        setattr(rep, f"{q}_exit", getattr(rep, f"{q}_exit") + (rep.simulation or 0))
+
+    # --- 4. Persist Workload Totals ---
+    for q in q_order:
+        setattr(rep, f"{q}_add_fct", sums[q]['forecast'])
+        setattr(rep, f"{q}_add_upside", sums[q]['upside'])
     
-    rep.q3_add_fct = sums['q3']['forecast']
-    rep.q3_add_upside = sums['q3']['upside']
-    
-    rep.q4_add_fct = sums['q4']['forecast']
-    rep.q4_add_upside = sums['q4']['upside']
-    
-    # --- Recalculate Combined Metrics ---
+    # --- 5. Finalize Performance Metrics ---
     rep.q1_total_exit_with_fc = rep.q1_exit + rep.q1_add_fct
     rep.q2_total_exit_with_fc = rep.q2_exit + rep.q2_add_fct
-    
-    # Q3 calculation incorporates simulation overrides
-    rep.q3_exit = (rep.dec or 0) + (rep.jan or 0) + (rep.feb or 0) + (rep.simulation or 0)
     rep.q3_total_exit_with_fc = rep.q3_exit + rep.q3_add_fct
-    
     rep.q4_total_exit_with_fc = rep.q4_exit + rep.q4_add_fct
 
 
@@ -1436,51 +1400,8 @@ def upload_sales_data():
             current_actual_jan = get_float(row, ['current actual jan'])
             
             # --- Step 3: Complex Business Logic Calculations ---
-            # These formulas define how future performance is estimated during a partial month
+            # Monthly estimates and quarterly aggregations are now handled by helpers
             
-            # Future Projections based on 'Days Remaining' logic (simplified to constants)
-            january_estimated = current_daily_rate * 28.85
-            february_estimated = current_daily_rate * 28
-            
-            simulation = get_float(row, ['simulation'])
-            
-            # The "Q3 Estimated" formula combines multiple source fields
-            q3_exit = current_actual_jan + january_estimated + february_estimated + simulation + december_actual
-            
-            # Sequential Growth (QoQ)
-            if last_year_exit:
-                q1_qoq_pct = ((q1_exit / last_year_exit) - 1) * 100
-            else:
-                q1_qoq_pct = 0.0
-
-            q2_exit = q2_exit_raw
-            if q1_exit:
-                q2_qoq_pct = ((q2_exit / q1_exit) - 1) * 100
-            else:
-                q2_qoq_pct = 0.0
-                
-            if q2_exit:
-                q3_qoq_pct = ((q3_exit / q2_exit) - 1) * 100
-            else:
-                q3_qoq_pct = 0.0
-
-            # Upside & Forecast Aggregates
-            q3_add_fct = get_float(row, ['fy26q3 add. fct'])
-            q3_total_exit_with_fc = q3_exit + q3_add_fct
-            
-            if q2_exit:
-                qoq_plus_fct_pct = ((q3_total_exit_with_fc / q2_exit) - 1) * 100
-            else:
-                qoq_plus_fct_pct = 0.0
-                
-            q3_add_upside = get_float(row, ['fy26q3 add upside', 'fy26 q3 add upside'])
-            
-            # Q4 Projections
-            q4_exit = get_float(row, ['fy26q4 exit', 'fy26 q4 exit'])
-            q4_add_fct = get_float(row, ['fy26q4 add. fct', 'fy26 q4 add. fct', 'fy26q4 add fct'])
-            q4_add_upside = get_float(row, ['fy26q4 add upside', 'fy26 q4 add upside'])
-            q4_total_exit_with_fc = q4_exit + q4_add_fct
-
             # --- Step 4: Database Persistence ---
             # Default to the most recently created Fiscal Year
             latest_fy = db.query(FiscalYear).order_by(FiscalYear.year.desc()).first()
@@ -1495,7 +1416,6 @@ def upload_sales_data():
             ).first()
             
             if not rep:
-                # Create if missing
                 rep = SalesRep(
                     name=rep_name, 
                     cluster_id=int(cluster_id),
@@ -1503,28 +1423,26 @@ def upload_sales_data():
                 )
                 db.add(rep)
             
-            # Update core performance fields
+            # Update basic input fields
             rep.last_year_exit = last_year_exit
             rep.q1_exit = q1_exit
             rep.q2_exit = q2_exit
-            
             rep.last_week_daily_rate = last_week_daily_rate
             rep.current_daily_rate = current_daily_rate
-            
-            # Note: Specific monthly columns (Jan, Feb, etc.) are implicitly updated via Q3 logic
             rep.simulation = simulation
-            rep.q3_exit = q3_exit
             
-            # Forecast and Upside fields
-            rep.q3_add_fct = q3_add_fct
-            rep.q3_total_exit_with_fc = q3_total_exit_with_fc
-            rep.q3_add_upside = q3_add_upside
+            # Monthly actuals - capture what's in the file
+            rep.dec = december_actual
+            rep.jan = current_actual_jan
             
-            # Q4 Projections
-            rep.q4_exit = q4_exit
-            rep.q4_add_fct = q4_add_fct
-            rep.q4_total_exit_with_fc = q4_total_exit_with_fc
-            rep.q4_add_upside = q4_add_upside
+            # Trigger centralized projections and aggregations
+            cluster_obj = db.query(Cluster).filter(Cluster.id == int(cluster_id)).first()
+            p_date = cluster_obj.partial_data_date if cluster_obj else None
+            
+            # 1. Project future months
+            calculate_future_estimates(rep, p_date)
+            # 2. Aggregate months into quarters + incorporate workloads
+            update_from_workloads(rep, db)
             
             count += 1
 
