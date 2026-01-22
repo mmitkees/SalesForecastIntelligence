@@ -20,7 +20,8 @@ trigger: always_on
 3.  **Code Flow:**
     *   Develop on `dev` or any other feature branches.
     *   Merge to `prod` before deploying.
-    *   Run `remote_deploy.sh` to sync the remote server.
+    *   **ALWAYS ask the user for explicit approval before running `remote_deploy.sh`.**
+    *   Run `remote_deploy.sh` only after user confirms.
 
 ## Rationale
 
