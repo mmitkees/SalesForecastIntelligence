@@ -443,7 +443,13 @@ document.addEventListener('change', async (e) => {
             if (!res.ok) throw new Error();
             input.classList.replace('saving', 'saved');
             setTimeout(() => input.classList.remove('saved'), 1000);
-            updateTotalsLocally(input);
+
+            // If daily rate changed, reload full dashboard to refresh all quarters
+            if (field === 'current_daily_rate') {
+                await loadDashboardData();
+            } else {
+                updateTotalsLocally(input);
+            }
         } catch (error) {
             input.classList.replace('saving', 'error');
             setTimeout(() => input.classList.remove('error'), 2000);
