@@ -1157,10 +1157,23 @@ def update_from_workloads(rep, db):
             return rep.current_month_est or getattr(rep, field_name) or 0
         return getattr(rep, field_name) or 0
     
-    rep.q1_exit = get_month_value(6, 'jun') + get_month_value(7, 'jul') + get_month_value(8, 'aug')
-    rep.q2_exit = get_month_value(9, 'sep') + get_month_value(10, 'oct') + get_month_value(11, 'nov')
-    rep.q3_exit = get_month_value(12, 'dec') + get_month_value(1, 'jan') + get_month_value(2, 'feb')
-    rep.q4_exit = get_month_value(3, 'mar') + get_month_value(4, 'apr') + get_month_value(5, 'may')
+    
+    # Calculate quarterly exits from monthly values
+    calculated_q1 = get_month_value(6, 'jun') + get_month_value(7, 'jul') + get_month_value(8, 'aug')
+    calculated_q2 = get_month_value(9, 'sep') + get_month_value(10, 'oct') + get_month_value(11, 'nov')
+    calculated_q3 = get_month_value(12, 'dec') + get_month_value(1, 'jan') + get_month_value(2, 'feb')
+    calculated_q4 = get_month_value(3, 'mar') + get_month_value(4, 'apr') + get_month_value(5, 'may')
+    
+    # Preserve manually set Q1 and Q2 values (historical quarters) when monthly data is incomplete
+    # Only update if we have actual monthly data (calculated > 0) OR if the current value is 0
+    if calculated_q1 > 0 or rep.q1_exit == 0:
+        rep.q1_exit = calculated_q1
+    if calculated_q2 > 0 or rep.q2_exit == 0:
+        rep.q2_exit = calculated_q2
+    
+    # Always update Q3 and Q4 from monthly values (current/future quarters based on daily rate)
+    rep.q3_exit = calculated_q3
+    rep.q4_exit = calculated_q4
     
     # Apply Simulation to Current and Next Quarter only
     for q in [current_q, next_q]:
