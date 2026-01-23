@@ -550,13 +550,22 @@ function updateTotalsLocally(changedInput) {
 
 /**
  * Toggles the override lock for a quarter.
+ * Automatically expands the quarter section to show editable fields.
  */
 window.toggleOverride = (q, e) => {
     e.stopPropagation();
     const currentOverrides = state.overrides || {};
     currentOverrides[q] = !currentOverrides[q];
     setState('overrides', currentOverrides);
-    refreshQuarterData();
+
+    // Ensure the quarter section is expanded when override is activated
+    const content = document.getElementById(`${q}-content`);
+    if (content && content.style.display !== 'block') {
+        window.toggleQuarter(q);
+    } else {
+        // If already expanded, just refresh the data
+        refreshQuarterData();
+    }
 };
 
 async function refreshQuarterData() {
