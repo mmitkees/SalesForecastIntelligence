@@ -75,3 +75,4 @@ This document outlines test cases for validating the application across differen
 | ID | Description | Expected Result |
 | :--- | :--- | :--- |
 | **BUG-001** | **Workload Seeder Q2 Upload**<br>Upload an Excel file with Q2 data (Sep/Oct/Nov columns). | Workloads are created with correct `month_1`, `month_2`, `month_3` values and non-zero `total`. |
+| **BUG-002** | **Override Button State Persistence**<br>1. Navigate to Dashboard<br>2. Click Override button for any quarter (should show "🔓 Override Active")<br>3. Perform a full page reload (F5)<br>4. Check the same quarter's Override button | Override button should still show "🔓 Override Active" after page reload. State should persist in localStorage. When toggled off and reloaded, it should remain off. |
