@@ -552,8 +552,10 @@ function updateTotalsLocally(changedInput) {
  * Toggles the override lock for a quarter.
  */
 window.toggleOverride = (q, e) => {
-    e.stopPropagation(); state.overrides = state.overrides || {};
-    state.overrides[q] = !state.overrides[q];
+    e.stopPropagation();
+    const currentOverrides = state.overrides || {};
+    currentOverrides[q] = !currentOverrides[q];
+    setState('overrides', currentOverrides);
     refreshQuarterData();
 };
 
