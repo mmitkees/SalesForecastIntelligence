@@ -167,6 +167,15 @@ set -e
 # Ensure required directories exist in APP DIR
 mkdir -p "$REMOTE_APP_DIR/logs" "$REMOTE_APP_DIR/db_backups" "$REMOTE_APP_DIR/generated_reports"
 
+# ==============================================================================
+# CRITICAL: Backup database before git operations
+# ==============================================================================
+if [ -f "$REMOTE_APP_DIR/sales_app_v3.db" ]; then
+    echo "Backing up database to preserve data during deployment..."
+    cp "$REMOTE_APP_DIR/sales_app_v3.db" "/tmp/sales_app_v3_preserve.db"
+    echo "Database backed up to /tmp/sales_app_v3_preserve.db"
+fi
+
 if [ -d "$REMOTE_APP_DIR/.git" ]; then
     # Repository exists - pull latest changes
     echo "Repository found. Pulling latest changes..."
@@ -202,6 +211,16 @@ else
     fi
     
     echo "Repository cloned successfully!"
+fi
+
+# ==============================================================================
+# CRITICAL: Restore database after git operations
+# ==============================================================================
+if [ -f "/tmp/sales_app_v3_preserve.db" ]; then
+    echo "Restoring database from backup..."
+    cp "/tmp/sales_app_v3_preserve.db" "$REMOTE_APP_DIR/sales_app_v3.db"
+    rm -f "/tmp/sales_app_v3_preserve.db"
+    echo "Database restored successfully!"
 fi
 
 # Ensure directories exist after git operations
