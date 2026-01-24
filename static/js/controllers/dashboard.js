@@ -552,17 +552,51 @@ function updateTotalsLocally(changedInput) {
  * Toggles the override lock for a quarter.
  */
 window.toggleOverride = (q, e) => {
-    e.stopPropagation(); state.overrides = state.overrides || {};
-    state.overrides[q] = !state.overrides[q];
-    refreshQuarterData();
+    e.stopPropagation();
+
+    // Create a new overrides object to avoid mutation issues
+    // CRITICAL: We must create a new object, not mutate the existing one
+    // This ensures proper change detection and re-rendering
+    const currentOverrides = state.overrides || {};
+    const newOverrides = { ...currentOverrides };
+    newOverrides[q] = !currentOverrides[q];
+
+    // Update the state with the new object
+    state.overrides = newOverrides;
+
+    // Check if the quarter is currently collapsed
+    const content = document.getElementById(`${q}-content`);
+    const isCollapsed = !content || content.style.display !== 'block';
+
+    // If collapsed, mark it to be expanded after refresh
+    if (isCollapsed) {
+        state.quarterToExpand = q;
+    }
+
+    // Use setTimeout to ensure state change completes before refresh
+    // This prevents race conditions where the re-render happens before state updates
+    setTimeout(() => refreshQuarterData(), 0);
 };
 
 async function refreshQuarterData() {
     if (!state.currentClusterId) return;
-    const openQ = ['q1', 'q2', 'q3', 'q4'].find(q => document.getElementById(`${q}-content`)?.style.display === 'block');
+
+    // Determine which quarter to keep open after refresh
+    // Priority: explicitly requested quarter > currently open quarter
+    const openQ = state.quarterToExpand || ['q1', 'q2', 'q3', 'q4'].find(q => document.getElementById(`${q}-content`)?.style.display === 'block');
     const scroll = window.scrollY;
+
     await loadDashboardData();
-    if (openQ) window.toggleQuarter(openQ);
+
+    // Re-open the quarter that was open (or should be opened)
+    if (openQ) {
+        // Use setTimeout to ensure DOM is fully rendered before expanding
+        setTimeout(() => window.toggleQuarter(openQ), 0);
+    }
+
+    // Clear the expansion request
+    state.quarterToExpand = null;
+
     window.scrollTo(0, scroll);
 }
 
