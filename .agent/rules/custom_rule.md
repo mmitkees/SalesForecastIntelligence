@@ -19,9 +19,11 @@ trigger: always_on
 
 3.  **Code Flow:**
     *   Develop on `dev` or any other feature branches.
-    *   Merge to `prod` before deploying.
+    *   **NEVER** push to the `prod` branch without explicit user approval.
+    *   Merge to `prod` only after getting approval.
     *   **ALWAYS ask the user for explicit approval before running `remote_deploy.sh`.**
-    *   Run `remote_deploy.sh` only after user confirms.
+    *   **NEVER** set `SafeToAutoRun` to `true` for `./deployment/remote_deploy.sh`. It must ALWAYS be stopped for user review.
+    *   Run `remote_deploy.sh` only after user confirms via chat.
 
 ## Rationale
 

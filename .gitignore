@@ -27,3 +27,8 @@ generated reports/
 # Note: .env is NOT ignored - it's needed for deployment configuration
 # Sensitive credentials should use .env.local which IS ignored
 .env.local
+sales_app_v3.db
+helper_tools/analyze_duplicate_reps.py
+helper_tools/test_prod_merge.sh
+helper_tools/merge_duplicate_reps.py
+db_backups/sales_app_v3_before_dedup_2026-01-23_15-37-11.db
