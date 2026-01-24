@@ -235,13 +235,13 @@ After=network.target
 [Service]
 User=$USER_NAME
 WorkingDirectory=$WORK_DIR
-ExecStart=$WORK_DIR/venv/bin/python $WORK_DIR/backend/app.py
+ExecStart=$WORK_DIR/venv/bin/python3 $WORK_DIR/backend/app.py
 Restart=always
 Environment="DATABASE_URL=$DB_URL"
 Environment="TNS_ADMIN=$WALLET_PATH"
 Environment="PORT=$PORT"
-StandardOutput=append:$WORK_DIR/logs/app.log
-StandardError=append:$WORK_DIR/logs/app.err
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
