@@ -138,14 +138,19 @@ class SalesRep(Base):
     q2_total_exit_with_fc = Column(Float, default=0.0)
     q2_add_upside = Column(Float, default=0.0)
     
-    # --- Daily Rates & Simulation (for current month estimation) ---
+    # Daily Rates & Simulation (for current month estimation) ---
     # The date when the last snapshot was taken
     partial_data_date = Column(String(20)) # e.g. "13/01/2026"
     # Daily consumption rate recorded last week
     last_week_daily_rate = Column(Float, default=0.0)
     # Daily consumption rate recorded currently
     current_daily_rate = Column(Float, default=0.0)
-    # Simulation factor or override for projections
+    # Simulation factors for individually overriding quarterly projections
+    q1_simulation = Column(Float, default=0.0)
+    q2_simulation = Column(Float, default=0.0)
+    q3_simulation = Column(Float, default=0.0)
+    q4_simulation = Column(Float, default=0.0)
+    # Deprecated: Legacy single simulation field (keeping for compatibility during transition)
     simulation = Column(Float, default=0.0)
     
     # --- Monthly Actuals (Final values for each month) ---

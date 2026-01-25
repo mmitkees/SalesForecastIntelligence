@@ -30,9 +30,9 @@ export function formatPercent(value) {
  * @returns {string} 'text-red', 'text-yellow', or 'text-green'.
  */
 export function getPercentColorClass(value) {
-    if (value < 0) return 'text-red';      // Negative growth
-    if (value < 10) return 'text-yellow'; // Low/Moderate growth
-    return 'text-green';                  // Strong growth
+    if (value <= 1) return 'text-red';     // <= 1% is Red (Plum)
+    if (value <= 7) return 'text-yellow';  // 1-7% is Yellow (Grey)
+    return 'text-green';                   // > 7% is Green (Blue)
 }
 
 /**

@@ -3,7 +3,7 @@
  * Handles primary application state management, UI routing, and global event delegation.
  */
 import { fetchClusters, createCluster, fetchFiscalYears, getCurrentUser, logout, createRegion } from './api.js';
-import { loadDashboardData } from './controllers/dashboard.js';
+import { loadDashboardData } from './controllers/dashboard_rendering_logic.js';
 import { loadWorkloadsData, handleSort, openModal, closeModal, handleFormSubmit, uploadExcel } from './controllers/workloads.js';
 import { loadAdminData } from './controllers/admin.js';
 import { loadAnalyticsData } from './controllers/analytics.js';
@@ -167,10 +167,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         setState('currentClusterId', parseInt(savedClusterId));
     }
 
-    // Parallel load of UI framework and data
-    await loadView(savedView);
+    // Load Context FIRST (Fiscal Years & Clusters)
+    // This ensures state.currentClusterId is validated/set before the view tries to use it
     await loadFiscalYears();
     await loadClusters();
+
+    // Load View LAST
+    await loadView(savedView);
 
     // Hide admin nav for regular users
     updateNavVisibility(user);

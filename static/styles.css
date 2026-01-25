@@ -58,6 +58,7 @@ body {
     color: var(--text-primary);
     min-height: 100vh;
     line-height: 1.6;
+    overflow-x: hidden;
     /* Subtle background pattern/curve */
     background-image: radial-gradient(circle at 50% 0%, #f3e5f5 0%, var(--bg-dark) 60%);
     background-attachment: fixed;
@@ -273,8 +274,7 @@ body {
 /* ===== Main Content ===== */
 .main-content {
     flex: 1;
-    padding: 160px 40px 40px;
-    /* Top nav is taller now (~120px) + spacing */
+    padding: 80px 40px 40px;
     background: var(--bg-dark);
     min-height: 100vh;
 }
@@ -335,13 +335,13 @@ body {
 }
 
 .view-header {
-    margin-bottom: 32px;
+    margin-bottom: 0;
 }
 
 .view-header h2 {
     font-size: 1.75rem;
     font-weight: 700;
-    margin-bottom: 4px;
+    margin: 0;
 }
 
 .view-header .subtitle {
@@ -552,7 +552,8 @@ body {
 }
 
 .text-yellow {
-    color: #FFC107 !important;
+    color: #d67616 !important;
+    /* Amber/Yellow */
     font-weight: 600;
 }
 
@@ -587,7 +588,82 @@ body {
     background: var(--bg-sidebar) !important;
 }
 
-/* Quarterly Breakdown Collapsible */
+/* Quarterly Tabs Interface */
+.quarter-tabs-container {
+    margin-top: 32px;
+}
+
+.quarter-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 24px;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    padding: 0 20px;
+}
+
+.quarter-tab {
+    padding: 16px 32px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    position: relative;
+    bottom: -2px;
+}
+
+.quarter-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-card-hover);
+}
+
+.quarter-tab.active {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+    background: transparent;
+}
+
+.quarter-tab-content {
+    display: none;
+}
+
+.quarter-tab-content.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+.quarter-section-tabbed {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    border: 1px solid var(--border-color);
+}
+
+.quarter-header-tabbed {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.quarter-header-tabbed h3 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.quarter-header-tabbed .header-info {
+    display: flex;
+    gap: 12px;
+}
+
+/* Old Collapsible Styles - Deprecated but kept for compatibility */
 .quarterly-breakdown {
     margin-top: 24px;
 }
@@ -1952,16 +2028,15 @@ input[type=number] {
 }
 
 .col-qoq-plus {
-    background-color: rgba(255, 235, 59, 0.15) !important;
-    /* Soft Yellow */
-    /* Keeping text color dynamic (red/green) if possible, or override? */
-    /* The JS sets text-green/red, so background is enough */
+    background-color: rgba(156, 39, 176, 0.08) !important;
+    /* Muted Purple (Cascaded from previous Upside) */
 }
 
 .col-upside {
-    background-color: rgba(156, 39, 176, 0.1) !important;
-    /* Soft Purple */
-    color: #6a1b9a;
+    background-color: rgba(255, 193, 7, 0.12) !important;
+    /* Soft Amber/Gold (Cascaded from previous QoQ+) */
+    color: #b45309;
+    /* Deepen text for contrast */
 }
 
 .data-table td.col-fct strong,
