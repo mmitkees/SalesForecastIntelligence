@@ -13,13 +13,8 @@ export function formatCurrency(value) {
     }).format(value);
 }
 
-/**
- * Formats a value as a percentage string.
- * @param {number|string} value - The value to format.
- * @returns {string} "X.X%".
- */
 export function formatPercent(value) {
-    const formatted = parseFloat(value).toFixed(1);
+    const formatted = Math.round(parseFloat(value) || 0);
     return `${formatted}%`;
 }
 

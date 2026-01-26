@@ -472,14 +472,35 @@ window.exportQuarterDashboardToExcel = function (quarter, event) {
     const qLower = quarter.toLowerCase();
     const table = document.getElementById(`${qLower}-table`);
     if (!table) return;
+
     const clusterSelect = document.getElementById('cluster-select');
     const clusterName = clusterSelect?.options[clusterSelect.selectedIndex]?.text || 'Cluster';
     const now = new Date();
     const shortDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-    // TableToExcel usage assumed global or missing. Usually requires library.
-    if (typeof TableToExcel !== 'undefined') {
-        TableToExcel.convert(table, { name: `${clusterName}_${quarter}_Breakdown_${shortDate}.xlsx`, sheet: { name: "Sheet 1" } });
+    const filename = `${clusterName}_${quarter}_Breakdown_${shortDate}.xlsx`;
+
+    // Use SheetJS (XLSX) which is loaded in index.html
+    if (typeof XLSX !== 'undefined') {
+        try {
+            // Clone the table so we can modify it for export without affecting the UI
+            const clone = table.cloneNode(true);
+
+            // Replace all inputs with their current values
+            const originalInputs = table.querySelectorAll('input');
+            const cloneInputs = clone.querySelectorAll('input');
+
+            originalInputs.forEach((input, idx) => {
+                const parent = cloneInputs[idx].parentElement;
+                parent.textContent = input.value;
+            });
+
+            const wb = XLSX.utils.table_to_book(clone, { sheet: "Sheet 1" });
+            XLSX.writeFile(wb, filename);
+        } catch (err) {
+            console.error("Export failed:", err);
+            alert("Export failed. Check console for details.");
+        }
     } else {
-        alert("Export library not loaded");
+        alert("XLSX library not loaded");
     }
 };

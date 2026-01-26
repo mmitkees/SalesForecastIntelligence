@@ -216,6 +216,22 @@ export function processQuarterData(q, reps, config, currentMonthIdx, partialDate
                 r[f.totalExit] = existingTotal;
             }
         }
+
+        // D. Recalculate Row-Level Percentages (QoQ and QoQ+)
+        if (f.prevExit) {
+            const prev = r[f.prevExit] || 0;
+            if (prev > 0) {
+                if (f.qQoQ) {
+                    r[f.qQoQ] = (((r[f.qEst] || 0) / prev) - 1) * 100;
+                }
+                if (f.qoqPlusFct) {
+                    r[f.qoqPlusFct] = (((r[f.totalExit] || 0) / prev) - 1) * 100;
+                }
+            } else {
+                if (f.qQoQ) r[f.qQoQ] = 0;
+                if (f.qoqPlusFct) r[f.qoqPlusFct] = 0;
+            }
+        }
     });
 
     // 2. Calculate Footer Totals
