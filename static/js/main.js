@@ -3,7 +3,7 @@
  * Handles primary application state management, UI routing, and global event delegation.
  */
 import { fetchClusters, createCluster, fetchFiscalYears, getCurrentUser, logout, createRegion } from './api.js';
-import { loadDashboardData } from './controllers/dashboard_rendering_logic.js';
+import { loadDashboardData } from './controllers/dashboard.js';
 import { loadWorkloadsData, handleSort, openModal, closeModal, handleFormSubmit, uploadExcel } from './controllers/workloads.js';
 import { loadAdminData } from './controllers/admin.js';
 import { loadAnalyticsData } from './controllers/analytics.js';
