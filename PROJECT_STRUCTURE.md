@@ -39,35 +39,47 @@ This application is a Sales Consumption Intelligence Dashboard built with Python
 │   └── favicon.svg         # Site icon
 ├── deployment/             # Deployment scripts
 │   ├── deploy.sh           # Local/Remote deployment script
-│   ├── remote_deploy.sh    # Git-based remote deployment
+│   ├── remote_deploy.sh    # Legacy git-based remote deployment
+│   ├── remote_deploy_dev.sh # Deployment to Dev Server (129.151.152.53)
+│   ├── remote_deploy_prod.sh # Deployment to Prod Server (129.151.159.172)
 │   └── requirements.txt    # Python dependencies
 ├── cron_jobs/              # Scheduled tasks
 │   ├── backup_db.sh        # Database backup script
 │   ├── run_weekly_export.sh # Weekly export job wrapper
 │   └── crontab.txt         # Cron job definitions
+├── helper_tools/           # Utility scripts for data management
+│   ├── sync_prod_db.sh     # Sync Prod DB to Local or Dev server
+│   ├── merge_duplicate_reps.py # Safe merger for duplicate Sales Reps
+│   └── Workload Seeder.xlsx # Excel template for bulk workload uploads
 ├── logs/                   # Application logs (gitignored)
 ├── db_backups/             # Database backups (gitignored)
 ├── generated_reports/      # Generated reports (gitignored)
 ├── sales_app_v3.db         # SQLite database (Production data)
 ├── .env                    # Environment configuration
 ├── .env.example            # Environment template
-└── Workload Seeder.xlsx    # Excel template for bulk workload uploads
+└── server_keys/            # SSH keys for remote access
 ```
 
 ## Deployment
 
 ### Remote Deployment (Recommended)
-Deploy to your remote server using git-based deployment:
+Deploy to your servers using the environment-specific scripts:
 
+**To Development:**
 ```bash
-./deployment/remote_deploy.sh
+./deployment/remote_deploy_dev.sh
 ```
 
-This script:
-1. Creates a full backup of the remote app directory
-2. Pulls latest code from Git (preserving local data)
-3. Installs dependencies and configures services
-4. Installs cron jobs for scheduled backups
+**To Production:**
+```bash
+./deployment/remote_deploy_prod.sh
+```
+
+These scripts:
+1. Pull latest code from Git (Dev branch for dev, Prod branch for prod)
+2. Preserve existing database data
+3. Install dependencies and configure services
+4. Restart the application service
 
 ### Local Deployment
 Run locally for development:
@@ -76,16 +88,12 @@ Run locally for development:
 ./deployment/deploy.sh
 ```
 
-Follow the interactive prompts to:
-1. Select Database (**Local SQLite** or **Oracle ADB**)
-2. Configure system services (`systemd` for Linux, `launchd` for macOS)
-
 ---
 
 ## Manual Development
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.9+
 - Git
 
 ### Quick Start
@@ -108,20 +116,22 @@ Access the app at: `http://localhost:8888`
 DATABASE_URL=sqlite:///sales_app_v3.db
 PORT=8888
 
-# Remote Deployment
-REMOTE_SERVER_IP=129.151.159.172
+# Remote IPs
+prod_ip=129.151.159.172
+Dev_ip=129.151.152.53
+
+# Deployment Config
 REMOTE_SERVER_USER=opc
-SSH_KEY_PATH=serverkeys/ssh-key-2026-01-13.key
+SSH_KEY_PATH=server_keys/ssh-key-2026-01-13.key
 REMOTE_APP_DIR=/home/opc/sales-app
 GIT_REPO_URL=https://github.com/mmitkees/SalesForecastIntelligence.git
-GIT_BRANCH=dev
 ```
 
 ---
 
 ## Features
-- **Dashboard**: View consumption data across Q1-Q4 with real-time updates
-- **Workloads**: Add, Edit, and Manage workloads tagged to specific quarters
-- **Admin**: Manage Clusters and Sales Reps, bulk upload workloads
-- **Automated Backups**: Daily database backups via cron (2 AM)
-- **Pre-Deployment Backups**: Full app backup before each deployment
+- **Dashboard**: View consumption data across Q1-Q4 with real-time updates and simulations.
+- **Workloads**: Tabbed interface to manage workloads tagged to specific quarters.
+- **Environment Indicators**: Visual "DEV" or "PROD" badges to prevent accidental changes.
+- **DB Sync Tool**: Easily pull production data to local or dev environments for testing.
+- **Automated Backups**: Daily database backups via cron.
