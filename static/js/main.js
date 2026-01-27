@@ -177,6 +177,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Hide admin nav for regular users
     updateNavVisibility(user);
+
+    // Display environment badge
+    displayEnvironmentBadge();
 });
 
 /**
@@ -237,6 +240,35 @@ function updateNavVisibility(user) {
         if (clusterDropdown) clusterDropdown.style.display = 'none';
     } else {
         if (clusterDropdown) clusterDropdown.style.display = 'block';
+    }
+}
+
+/**
+ * Detects the current execution environment and displays a badge.
+ */
+function displayEnvironmentBadge() {
+    const logoContainer = document.querySelector('.logo');
+    if (!logoContainer) return;
+
+    const hostname = window.location.hostname;
+    // Check for dev IP, localhost, or dev-specific subdomains
+    const isDev = hostname === '129.151.152.53' || hostname === 'localhost' || hostname === '127.0.0.1';
+    const isProd = hostname === '129.151.159.172' || hostname.includes('salesforecast');
+
+    if (isDev) {
+        const badge = document.createElement('span');
+        badge.className = 'env-badge';
+        badge.textContent = 'DEV';
+        badge.title = 'Development Environment';
+        logoContainer.appendChild(badge);
+    } else if (isProd) {
+        // Optional: Show PROD badge or keep it clean
+        // For now, let's show a subtle green one as requested to tell them apart
+        const badge = document.createElement('span');
+        badge.className = 'env-badge env-badge-prod';
+        badge.textContent = 'PROD';
+        badge.title = 'Production Environment';
+        logoContainer.appendChild(badge);
     }
 }
 

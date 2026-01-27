@@ -133,6 +133,27 @@ body {
     /* Prevent wrapping */
 }
 
+/* Environment Indicator Badge */
+.env-badge {
+    padding: 2px 6px;
+    background-color: #f59e0b;
+    /* Amber */
+    color: white;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    margin-left: -4px;
+    margin-top: -12px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.env-badge-prod {
+    background-color: #10b981;
+    /* Green */
+}
+
 .nav-menu {
     display: flex;
     flex-direction: row;
