@@ -34,29 +34,45 @@ echo "Deployment started at $(date)"
 # Helper: Check and Clean Port
 cleanup_port() {
     local p=$1
+    local OS_TYPE=$(uname)
     
-    # Stop systemd service first if it exists to prevent auto-restart fighting
-    if command -v systemctl &> /dev/null; then
-        if systemctl is-active --quiet $APP_NAME; then
+    # 1. Stop background services to prevent auto-restart loops
+    if [ "$OS_TYPE" == "Linux" ] && command -v systemctl &> /dev/null; then
+        if systemctl is-active --quiet $APP_NAME 2>/dev/null; then
             echo -e "${YELLOW}Stopping $APP_NAME systemd service...${NC}"
             sudo systemctl stop $APP_NAME
-            sleep 2
+            sleep 1
+        fi
+    elif [ "$OS_TYPE" == "Darwin" ]; then
+        local PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
+        if [ -f "$PLIST_PATH" ]; then
+             echo -e "${YELLOW}Stopping $SERVICE_NAME via launchctl...${NC}"
+             launchctl unload "$PLIST_PATH" 2>/dev/null
+             sleep 1
         fi
     fi
 
     echo -e "${YELLOW}Checking availability of port $p...${NC}"
-    PID=$(lsof -ti :$p)
-    if [ ! -z "$PID" ]; then
-        echo -e "${YELLOW}Port $p is in use by PID $PID. Killing it...${NC}"
-        kill -9 $PID 2>/dev/null || sudo kill -9 $PID 2>/dev/null
-        sleep 1
-        PID_RECHECK=$(lsof -ti :$p)
-        if [ ! -z "$PID_RECHECK" ]; then
-             echo -e "${RED}Error: Failed to free port $p. It might be owned by another user (e.g., root).${NC}"
-             sudo kill -9 $PID_RECHECK 2>/dev/null || true
+    PIDS=$(lsof -ti :$p)
+    if [ ! -z "$PIDS" ]; then
+        echo -e "${YELLOW}Port $p is in use. Killing processes...${NC}"
+        # Iterate through PIDs to handle multiple processes binding to the same port
+        for pid in $PIDS; do
+            echo "Killing PID $pid..."
+            kill -9 $pid 2>/dev/null || sudo kill -9 $pid 2>/dev/null || true
+        done
+        sleep 2
+        
+        # Re-check and attempt aggressive cleanup if necessary
+        REMAINDER=$(lsof -ti :$p)
+        if [ ! -z "$REMAINDER" ]; then
+             echo -e "${RED}Error: Port $p is still busy. Attempting aggressive cleanup with sudo...${NC}"
+             for pid in $REMAINDER; do
+                 sudo kill -9 $pid 2>/dev/null || true
+             done
              sleep 1
              if [ ! -z "$(lsof -ti :$p)" ]; then
-                 echo -e "${RED}Critical Error: Could not kill process on port $p.${NC}"
+                 echo -e "${RED}Critical Error: Could not free port $p. Manual intervention required.${NC}"
                  exit 1
              fi
         fi

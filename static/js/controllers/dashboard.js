@@ -1,22 +1,20 @@
 /**
  * Dashboard Controller.
- * Core financial engine of the frontend. Handles complex quarterly projections, 
- * real-time local recalculations, and server-side data synchronization.
+ * Consolidated financial engine of the frontend.
+ * v1.2.0 - Merged from beta branch fixes.
+ * Core Logic: Handles projections, real-time recalculations, and sync.
  */
 import { state, setState } from '../state.js';
 import { fetchDashboard } from '../api.js';
-import { formatCurrency, formatPercent, getPercentColorClass } from '../utils.js';
+import { formatCurrency, formatPercent, getPercentColorClass, showAlert } from '../utils.js';
 
-// --- Constants for Fiscal Month Logic ---
+// --- Constants ---
+
 /** @type {number[]} FY starts in June (index 5) */
 const FY_MONTHS = [5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4];
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-
-
-/** 
- * Maps frontend abstraction IDs to database field names.
- */
+/** maps frontend column IDs to API field names */
 const DB_FIELD_MAP = {
     'm_0': 'jan', 'm_1': 'feb', 'm_2': 'mar', 'm_3': 'apr', 'm_4': 'may', 'm_5': 'jun',
     'm_6': 'jul', 'm_7': 'aug', 'm_8': 'sep', 'm_9': 'oct', 'm_10': 'nov', 'm_11': 'dec',
@@ -26,112 +24,168 @@ const DB_FIELD_MAP = {
     'sim': 'simulation'
 };
 
+const Q_MONTHS_MAP = {
+    q1: [5, 6, 7],
+    q2: [8, 9, 10],
+    q3: [11, 0, 1],
+    q4: [2, 3, 4]
+};
+
+// --- View Helpers ---
+
 /**
  * Generates an editable HTML input for a numeric cell.
  */
-const mkInput = (repId, field, value, type = 'number') => `
-    <input type="${type}" ${type === 'number' ? 'step="1"' : ''} 
+const mkInput = (repId, field, value, type = 'number') => {
+    let formattedValue = value;
+    if (type === 'number' && !isNaN(value)) {
+        formattedValue = formatCurrency(Math.round(value));
+    }
+
+    return `
+    <input type="text" 
            class="editable-cell w-full bg-transparent border-none text-right focus:ring-0 p-0" 
            data-id="${repId}" 
            data-field="${field}" 
-           value="${type === 'number' && !isNaN(value) ? Math.round(value) : value}" 
+           data-original-type="${type}"
+           value="${formattedValue}" 
            onfocus="this.select()">
-`;
+    `;
+};
 
-/**
- * Primary entry point for dashboard data loading.
- */
-export async function loadDashboardData() {
-    if (!document.getElementById('quarterly-breakdowns-container')) return;
+// --- Calculation Helpers ---
 
-    // Handle No Cluster State
-    if (!state.currentClusterId) {
-        renderDashboard({ sales_reps: [] });
-        return;
-    }
+function calculatePartialDayParams(partialDateStr, currM) {
+    let partialDay = 0;
+    let daysInMonth = new Date(new Date().getFullYear(), currM + 1, 0).getDate();
 
-    try {
-        const dashboardData = await fetchDashboard(state.currentClusterId, state.currentFiscalYearId);
+    if (partialDateStr) {
+        const parts = partialDateStr.split('-');
+        const pd = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(partialDateStr);
 
-        // Sync cluster-level metadata
-        state.partialDataDate = dashboardData.partial_data_date || null;
-
-        renderDashboard(dashboardData);
-
-        // Initialize date picker for partial data calculations
-        const dateInput = document.getElementById('partial-data-date');
-        if (dateInput && typeof flatpickr !== 'undefined') {
-            flatpickr(dateInput, {
-                dateFormat: "d/m/Y",
-                defaultDate: state.partialDataDate || null,
-                onChange: (selectedDates, dateStr) => window.updatePartialDate(dateStr)
-            });
+        if (!isNaN(pd.getTime())) {
+            const now = new Date();
+            if (pd.getMonth() === now.getMonth() && pd.getFullYear() === now.getFullYear()) {
+                partialDay = pd.getDate();
+                daysInMonth = new Date(pd.getFullYear(), pd.getMonth() + 1, 0).getDate();
+            } else {
+                partialDay = now.getDate();
+            }
         }
-    } catch (e) {
-        console.error("Failed to load dashboard data", e);
+    } else {
+        partialDay = new Date().getDate();
     }
+    return { partialDay, daysInMonth };
 }
 
 /**
- * Main render loop for the dashboard view.
+ * Processes raw rep data for a quarter:
+ * Logic preserved from beta (dashboard_calculation_logic.js)
  */
-function renderDashboard(data) {
-    const reps = data.sales_reps || [];
+function processQuarterData(q, reps, config, currentMonthIdx, partialDateStr) {
+    const f = config.fields;
+    const cols = config.columns;
+    const qMonths = Q_MONTHS_MAP[q] || [];
+    const curFyIdxLocal = FY_MONTHS.indexOf(currentMonthIdx);
+    const currentYear = new Date().getFullYear();
 
-    // Determine current fiscal quarter for default expansion
-    // Determine current fiscal quarter for default expansion
-    const month = new Date().getMonth() + 1; // 1-12
-    let currentQuarter = 'q3';
-    if (month >= 6 && month <= 8) currentQuarter = 'q1';
-    else if (month >= 9 && month <= 11) currentQuarter = 'q2';
-    else if (month === 12 || month <= 2) currentQuarter = 'q3';
-    else if (month >= 3 && month <= 5) currentQuarter = 'q4';
+    const { partialDay, daysInMonth } = calculatePartialDayParams(partialDateStr, currentMonthIdx);
+    const monthFieldInfo = f[`m_${currentMonthIdx}`];
 
-    // Use saved quarter or default to current quarter
-    const quarterToExpand = state.dashboardExpandedQuarter || currentQuarter;
+    reps.forEach(r => {
+        // 1. Current Month Est
+        if (monthFieldInfo && partialDay > 0) {
+            const daysLeft = Math.max(0, daysInMonth - partialDay);
+            const daily = r.current_daily_rate || 0;
+            const actual = r[monthFieldInfo] || 0;
+            r.current_month_est = (daily * (daysLeft + 0.5)) + actual;
+        }
 
-    renderQuarterlyBreakdowns(reps, currentQuarter);
+        // 2. Project Future Months
+        qMonths.forEach(m => {
+            const mFyIdx = FY_MONTHS.indexOf(m);
+            if (mFyIdx > curFyIdxLocal) {
+                const monthFieldKey = DB_FIELD_MAP[`m_${m}`];
+                if (monthFieldKey) {
+                    const futureYear = m < 6 ? currentYear + 1 : currentYear;
+                    const daysInFutureMonth = new Date(futureYear, m + 1, 0).getDate();
+                    const daily = r.current_daily_rate || 0;
+                    r[monthFieldKey] = daily * daysInFutureMonth;
+                }
+            }
+        });
 
-    // Initial Accordion State - expand saved or current quarter
-    const targetContent = document.getElementById(`${quarterToExpand}-content`);
-    if (targetContent && targetContent.style.display === 'none') {
-        window.toggleQuarter(quarterToExpand);
-    }
+        // 3. Roll up to Quarter Exit
+        let monthSum = 0;
+        qMonths.forEach(m => {
+            const mKey = DB_FIELD_MAP[`m_${m}`];
+            let val = (m === currentMonthIdx) ? (r.current_month_est || 0) : (r[mKey] || 0);
+            monthSum += val;
+        });
+
+        if (f.qEst) {
+            const simField = f.sim || 'simulation';
+            const simulationVal = r[simField] || 0;
+            const calculatedExit = monthSum + simulationVal;
+            const existingExit = r[f.qEst] || 0;
+
+            if (calculatedExit !== 0) r[f.qEst] = calculatedExit;
+            else if (existingExit !== 0) r[f.qEst] = existingExit;
+        }
+
+        if (f.totalExit && f.addFct) {
+            const calcTotal = r[f.qEst] + (r[f.addFct] || 0);
+            const existingTotal = r[f.totalExit] || 0;
+            if (calcTotal !== 0) {
+                if (Math.abs(existingTotal - calcTotal) > 1) r[f.totalExit] = calcTotal;
+            } else if (existingTotal !== 0) {
+                r[f.totalExit] = existingTotal;
+            }
+        }
+
+        // 4. Row Level Percentages
+        if (f.prevExit) {
+            const prev = r[f.prevExit] || 0;
+            if (prev > 0) {
+                if (f.qQoQ) r[f.qQoQ] = (((r[f.qEst] || 0) / prev) - 1) * 100;
+                if (f.qoqPlusFct) r[f.qoqPlusFct] = (((r[f.totalExit] || 0) / prev) - 1) * 100;
+            } else {
+                if (f.qQoQ) r[f.qQoQ] = 0;
+                if (f.qoqPlusFct) r[f.qoqPlusFct] = 0;
+            }
+        }
+    });
+
+    // Aggregate Footer Totals
+    const totals = {};
+    let totalPrevDenom = 0;
+    cols.forEach(c => totals[c.key] = 0);
+
+    reps.forEach(r => {
+        cols.forEach(c => {
+            const field = f[c.key];
+            if (field && c.type !== 'percent') totals[c.key] += (r[field] || 0);
+        });
+        if (f.prevExit && f.prevQoQ) {
+            const exit = r[f.prevExit] || 0, pct = r[f.prevQoQ] || 0;
+            if (pct > -99.9) totalPrevDenom += (exit / (1 + (pct / 100)));
+        }
+    });
+
+    if (totalPrevDenom > 0 && totals.prevExit) totals.prevQoQ = ((totals.prevExit / totalPrevDenom) - 1) * 100;
+    if (f.qEst && f.prevExit && totals.prevExit > 0) totals.qQoQ = ((totals.qEst / totals.prevExit) - 1) * 100;
+    if (f.totalExit && f.prevExit && totals.prevExit > 0) totals.qoqPlusFct = ((totals.totalExit / totals.prevExit) - 1) * 100;
+
+    return { totals, totalPrevDenom };
 }
 
 /**
- * Renders all four quarterly sections in rolling priority order.
- */
-function renderQuarterlyBreakdowns(reps, currentQuarter) {
-    const container = document.getElementById('quarterly-breakdowns-container');
-    if (!container || !reps) return;
-
-    const currentMonthIdx = new Date().getMonth();
-    const allQuarters = ['q1', 'q2', 'q3', 'q4'];
-    const idx = allQuarters.indexOf(currentQuarter);
-    const displayOrder = [...allQuarters.slice(idx), ...allQuarters.slice(0, idx)];
-
-    container.innerHTML = displayOrder.map(q => {
-        const isCurrent = (q === currentQuarter);
-        const config = getQuarterConfig(q, currentMonthIdx, isCurrent);
-        return renderSection(q, reps, config);
-    }).join('');
-}
-
-/**
- * Configures the column schema and DB mapping for a specific quarter.
- * Dynamic month columns are generated based on the current date.
+ * Returns column schema and field mapping for a quarter.
  */
 function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
-    let qMonths = [];
-    if (q === 'q1') qMonths = [5, 6, 7];
-    if (q === 'q2') qMonths = [8, 9, 10];
-    if (q === 'q3') qMonths = [11, 0, 1];
-    if (q === 'q4') qMonths = [2, 3, 4];
-
+    const qMonths = Q_MONTHS_MAP[q] || [];
     const curFyIdx = FY_MONTHS.indexOf(currentMonthIdx);
 
-    // 1. Column Definition
     const columns = [
         { key: 'prevExit', label: 'Prev Q Exit' },
         { key: 'prevQoQ', label: 'Prev QoQ', type: 'percent', color: true }
@@ -146,13 +200,9 @@ function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
         const mName = MONTH_NAMES[m];
         const monthField = `m_${m}`;
 
-        if (mFyIdx < curFyIdx) {
-            columns.push({ key: monthField, label: `${mName} Act` });
-        } else if (mFyIdx === curFyIdx) {
-            columns.push({ key: monthField, label: `${mName} Act` }, { key: 'current_month_est', label: `${mName} Est`, readOnly: true });
-        } else {
-            columns.push({ key: monthField, label: `${mName} Est`, readOnly: true });
-        }
+        if (mFyIdx < curFyIdx) columns.push({ key: monthField, label: `${mName} Act` });
+        else if (mFyIdx === curFyIdx) columns.push({ key: monthField, label: `${mName} Act` }, { key: 'current_month_est', label: `${mName} Est`, readOnly: true });
+        else columns.push({ key: monthField, label: `${mName} Est`, readOnly: true });
     });
 
     columns.push(
@@ -165,7 +215,6 @@ function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
         { key: 'upside', label: 'Upside', readOnly: true, customClass: 'col-upside' }
     );
 
-    // 2. Field Mapping logic
     const fields = {};
     if (q === 'q1') {
         fields.prevExit = 'last_year_exit'; fields.qEst = 'q1_exit'; fields.qQoQ = 'q1_qoq_pct';
@@ -178,151 +227,148 @@ function getQuarterConfig(q, currentMonthIdx, isCurrentQuarter) {
         fields.qQoQ = 'q3_qoq_pct'; fields.addFct = 'q3_add_fct'; fields.totalExit = 'q3_total_exit_with_fc'; fields.qoqPlusFct = 'qoq_plus_fct_pct'; fields.upside = 'q3_add_upside';
     } else if (q === 'q4') {
         fields.prevExit = 'q3_total_exit_with_fc'; fields.prevQoQ = 'qoq_plus_fct_pct'; fields.qEst = 'q4_exit';
-        fields.qQoQ = 'q4_qoq_pct'; // Added missing field
-        fields.addFct = 'q4_add_fct'; fields.totalExit = 'q4_total_exit_with_fc'; fields.qoqPlusFct = 'q4_qoq_plus_fct_pct'; fields.upside = 'q4_add_upside';
+        fields.qQoQ = 'q4_qoq_pct'; fields.addFct = 'q4_add_fct'; fields.totalExit = 'q4_total_exit_with_fc'; fields.qoqPlusFct = 'q4_qoq_plus_fct_pct'; fields.upside = 'q4_add_upside';
     }
 
     columns.forEach(col => {
-        if (!fields[col.key] && DB_FIELD_MAP[col.key]) fields[col.key] = DB_FIELD_MAP[col.key];
+        if (col.key === 'sim') fields[col.key] = `${q}_simulation`;
+        else if (!fields[col.key] && DB_FIELD_MAP[col.key]) fields[col.key] = DB_FIELD_MAP[col.key];
     });
 
     return { title: `${q.toUpperCase()} Monthly Breakdown`, columns, fields };
 }
 
-/**
- * Renders a specific quarterly section.
- * Includes complex frontend-only calculations for Current Month and Future projections.
- */
-function renderSection(q, reps, config) {
+// --- Controller Logic ---
+
+export async function loadDashboardData() {
+    const container = document.getElementById('quarterly-breakdowns-container');
+    if (!container) return;
+
+    if (!state.currentClusterId && localStorage.getItem('currentClusterId')) {
+        state.currentClusterId = parseInt(localStorage.getItem('currentClusterId'));
+    }
+
+    if (!state.currentClusterId) {
+        renderDashboard({ sales_reps: [] });
+        return;
+    }
+
+    try {
+        const dashboardData = await fetchDashboard(state.currentClusterId, state.currentFiscalYearId);
+        state.partialDataDate = dashboardData.partial_data_date || null;
+        state.salesReps = dashboardData.sales_reps || [];
+
+        renderDashboard(dashboardData);
+
+        const dateInput = document.getElementById('partial-data-date');
+        if (dateInput && typeof flatpickr !== 'undefined') {
+            flatpickr(dateInput, {
+                dateFormat: "d/m/Y",
+                defaultDate: state.partialDataDate || null,
+                onChange: (selectedDates, dateStr) => window.updatePartialDate(dateStr)
+            });
+        }
+    } catch (e) {
+        console.error("Failed to load dashboard data", e);
+    }
+}
+
+function renderDashboard(data) {
+    const reps = data.sales_reps || [];
+    const month = new Date().getMonth() + 1;
+    let currentQuarter = 'q3';
+    if (month >= 6 && month <= 8) currentQuarter = 'q1';
+    else if (month >= 9 && month <= 11) currentQuarter = 'q2';
+    else if (month === 12 || month <= 2) currentQuarter = 'q3';
+    else if (month >= 3 && month <= 5) currentQuarter = 'q4';
+
+    renderQuarterlyBreakdowns(reps, currentQuarter);
+}
+
+function renderQuarterlyBreakdowns(reps, currentQuarter) {
+    const container = document.getElementById('quarterly-breakdowns-container');
+    if (!container || !reps) return;
+
+    const clusterKey = `dashboard_active_tab_${state.currentClusterId}`;
+    const savedTab = state[clusterKey] || currentQuarter;
+    state.activeQuarterTab = savedTab;
+
+    const currentMonthIdx = new Date().getMonth();
+    const allQuarters = ['q1', 'q2', 'q3', 'q4'];
+
+    const quarterContent = {};
+    allQuarters.forEach(q => {
+        const isCurrent = (q === currentQuarter);
+        const config = getQuarterConfig(q, currentMonthIdx, isCurrent);
+        quarterContent[q] = renderSection(q, reps, config, currentMonthIdx);
+    });
+
+    container.innerHTML = `
+        <div class="quarter-tabs-container">
+            <div class="quarter-tabs">
+                ${allQuarters.map(q => `
+                    <button class="quarter-tab ${state.activeQuarterTab === q ? 'active' : ''}" onclick="switchQuarterTab('${q}')">${q.toUpperCase()}</button>
+                `).join('')}
+            </div>
+            ${allQuarters.map(q => `
+                <div class="quarter-tab-content ${state.activeQuarterTab === q ? 'active' : ''}" id="${q}-tab-content">
+                    ${quarterContent[q]}
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function renderSection(q, reps, config, currentMonthIdx) {
     const f = config.fields;
     const cols = config.columns;
-
-    // --- Calculation Engine ---
-
-    const currM = new Date().getMonth();
-    const monthField = f[`m_${currM}`];
-    const partialDateStr = state.partialDataDate || '';
-    let partialDay = 0, daysInMonth = 0;
-
-    if (partialDateStr) {
-        const parts = partialDateStr.split('-');
-        // Handle YYYY-MM-DD format (typical from backend API)
-        const pd = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(partialDateStr);
-
-        if (!isNaN(pd.getTime())) {
-            // Only use partial day if it's in the current month/year
-            const now = new Date();
-            if (pd.getMonth() === now.getMonth() && pd.getFullYear() === now.getFullYear()) {
-                partialDay = pd.getDate();
-            } else {
-                partialDay = now.getDate(); // Fallback to today
-            }
-            daysInMonth = new Date(new Date().getFullYear(), currM + 1, 0).getDate();
-        }
-    } else {
-        // Fallback to today if no date provided
-        partialDay = new Date().getDate();
-        daysInMonth = new Date(new Date().getFullYear(), currM + 1, 0).getDate();
-    }
-
-    // 1. Recalculate Current Month Estimate
-    if (monthField && partialDay > 0) {
-        const daysLeft = Math.max(0, daysInMonth - partialDay);
-        reps.forEach(r => {
-            const daily = r.current_daily_rate || 0;
-            const actual = r[monthField] || 0;
-            // FORMULA: Current Est = (Daily Rate * (Days Remaining + 0.5 buffer)) + Actual To Date
-            r.current_month_est = (daily * (daysLeft + 0.5)) + actual;
-        });
-    }
-
-    // 2. Project Future Months
-    const currentYear = new Date().getFullYear();
-    const curFyIdxLocal = FY_MONTHS.indexOf(currM);
-    const qMonthsMap = { q1: [5, 6, 7], q2: [8, 9, 10], q3: [11, 0, 1], q4: [2, 3, 4] };
-    const qMonths = qMonthsMap[q] || [];
-
-    qMonths.forEach(m => {
-        const mFyIdx = FY_MONTHS.indexOf(m);
-        if (mFyIdx > curFyIdxLocal) {
-            const monthFieldKey = DB_FIELD_MAP[`m_${m}`];
-            if (monthFieldKey) {
-                const futureYear = m < 6 ? currentYear + 1 : currentYear;
-                const daysInFutureMonth = new Date(futureYear, m + 1, 0).getDate();
-                reps.forEach(r => {
-                    const daily = r.current_daily_rate || 0;
-                    // FORMULA: Future Est = Daily Rate * Days In Month
-                    r[monthFieldKey] = daily * daysInFutureMonth;
-                });
-            }
-        }
-    });
-
-    // 3. Roll up Subtotals to Quarter Estimate
-    reps.forEach(r => {
-        let monthSum = 0;
-        qMonths.forEach(m => {
-            const mKey = DB_FIELD_MAP[`m_${m}`];
-            if (mKey) monthSum += (r[mKey] || 0);
-        });
-
-        if (f.qEst) {
-            r[f.qEst] = monthSum + (r.simulation || 0);
-        }
-
-        if (f.totalExit && f.addFct) {
-            const calcTotal = r[f.qEst] + (r[f.addFct] || 0);
-            if (Math.abs((r[f.totalExit] || 0) - calcTotal) > 1) r[f.totalExit] = calcTotal;
-        }
-    });
-
-    // --- Totals Row Logic ---
-
-    const totals = {};
-    let totalPrevDenom = 0;
-    cols.forEach(c => totals[c.key] = 0);
-
-    reps.forEach(r => {
-        cols.forEach(c => {
-            const field = f[c.key];
-            if (field && c.type !== 'percent') totals[c.key] += (r[field] || 0);
-        });
-
-        // PrevQoQ Denominator Reconstruction
-        if (f.prevExit && f.prevQoQ) {
-            const exit = r[f.prevExit] || 0, pct = r[f.prevQoQ] || 0;
-            if (pct > -99.9) totalPrevDenom += (exit / (1 + (pct / 100)));
-        }
-    });
-
-    if (totalPrevDenom > 0 && totals.prevExit) totals.prevQoQ = ((totals.prevExit / totalPrevDenom) - 1) * 100;
-    if (f.qEst && f.prevExit && totals.prevExit > 0) totals.qQoQ = ((totals.qEst / totals.prevExit) - 1) * 100;
-    if (f.totalExit && f.prevExit && totals.prevExit > 0) totals.qoqPlusFct = ((totals.totalExit / totals.prevExit) - 1) * 100;
-
-    // --- HTML Generation ---
+    const { totals, totalPrevDenom } = processQuarterData(q, reps, config, currentMonthIdx, state.partialDataDate);
 
     const qLower = q.toLowerCase();
     const isOverride = state.overrides?.[qLower];
+    const month = new Date().getMonth() + 1;
+    let currQ = 'q3';
+    if (month >= 6 && month <= 8) currQ = 'q1';
+    else if (month >= 9 && month <= 11) currQ = 'q2';
+    else if (month === 12 || month <= 2) currQ = 'q3';
+    else currQ = 'q4';
+
+    const isCurrentQuarter = (q === currQ);
 
     const rows = reps.map(rep => {
         const tds = cols.map(c => {
-            const fieldName = f[c.key], val = fieldName ? (rep[fieldName] || 0) : 0;
-            const forceEdit = isOverride && fieldName && (c.key === 'prevExit' || c.key === 'prevQoQ');
+            const fieldName = f[c.key];
+            let val = (fieldName === 'current_month_est') ? (rep.current_month_est || 0) : (fieldName ? (rep[fieldName] || 0) : 0);
 
+            const forceEdit = isOverride && fieldName && (c.key === 'prevExit');
             const baseCls = c.customClass || '';
 
             if (c.type === 'percent' && !forceEdit) {
                 return `<td class="${getPercentColorClass(val)} ${baseCls}">${fieldName ? formatPercent(val) : '-'}</td>`;
             }
 
-            const isStandardInput = fieldName && !c.readOnly && !c.blue && !c.strong && !c.label.includes('Exit');
-            if (forceEdit || isStandardInput) {
-                return `<td class="${baseCls}">${mkInput(rep.id, fieldName, val, c.type === 'date' ? 'date' : 'number')}</td>`;
-            } else {
-                let txt = fieldName ? (c.type === 'date' ? val : formatCurrency(val)) : '-';
-                const cls = `${c.subtle ? 'subtle' : ''} ${c.blue ? 'highlight-blue' : ''} ${baseCls}`;
-                return `<td class="${cls}">${c.strong ? `<strong>${txt}</strong>` : txt}</td>`;
+            if (fieldName && !c.readOnly && !c.type) {
+                const ky = c.key;
+                const isMonthCol = ky.startsWith('m_');
+                const isRateCol = (ky === 'lastWk' || ky === 'currDaily');
+                const isStandard = isCurrentQuarter && (isMonthCol || isRateCol);
+                const isOverridden = isOverride && (ky === 'prevExit' || isMonthCol);
+
+                if (isStandard || isOverridden || ky === 'sim') {
+                    return `<td class="${baseCls}">${mkInput(rep.id, fieldName, val)}</td>`;
+                }
             }
+
+            if (c.key === 'sim') return `<td class="${baseCls}">${mkInput(rep.id, fieldName, val)}</td>`;
+
+            let txt = fieldName ? (c.type === 'date' ? val : formatCurrency(val)) : '-';
+            if (c.type === 'percent') {
+                txt = formatPercent(val);
+                return `<td class="${baseCls} ${getPercentColorClass(val)}"><strong>${txt}</strong></td>`;
+            }
+
+            const cls = `${c.subtle ? 'subtle' : ''} ${c.blue ? 'highlight-blue' : ''} ${baseCls}`;
+            return `<td class="${cls}">${c.strong ? `<strong>${txt}</strong>` : txt}</td>`;
         }).join('');
 
         let prevDenom = 0;
@@ -335,103 +381,82 @@ function renderSection(q, reps, config) {
 
     const tCell = (c) => {
         const baseCls = c.customClass || (c.blue ? 'highlight-blue' : '');
-
         if (c.type === 'percent') {
             const val = totals[c.key] || 0;
             const hasVal = (c.key === 'prevQoQ' && totalPrevDenom > 0) || (c.key === 'qQoQ' && f.qEst) || (c.key === 'qoqPlusFct' && f.totalExit);
             return `<td class="${getPercentColorClass(val)} ${baseCls}"><strong>${hasVal ? formatPercent(val) : '-'}</strong></td>`;
         }
         const val = totals[c.key];
-        // Blue is handled by baseCls now, but we keep existing logic check
         return `<td class="${baseCls}"><strong>${(f[c.key] || val !== 0) ? formatCurrency(val) : '-'}</strong></td>`;
     };
-
-    const month = new Date().getMonth() + 1;
-    let currQ = 'q3';
-    if (month >= 6 && month <= 8) currQ = 'q1';
-    else if (month >= 9 && month <= 11) currQ = 'q2';
-    else if (month === 12 || month <= 2) currQ = 'q3';
-    else currQ = 'q4';
 
     const savedDate = state.partialDataDate || '';
     const partialDataInput = (q === currQ) ? `
         <div class="partial-data-row" style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-            <label for="partial-data-date" style="font-weight: 500;">📅 Partial Data Of:</label>
-            <input type="text" id="partial-data-date" value="${savedDate}" placeholder="Select date..." style="padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; width: 150px;">
+            <label for="partial-data-date" style="font-weight: 500;">Partial Data Of:</label>
+            <div style="position: relative; display: inline-block;">
+                <input type="text" id="partial-data-date" value="${savedDate}" placeholder="Select date..." 
+                       style="padding: 8px 35px 8px 12px; border: 1px solid #ccc; border-radius: 6px; cursor: pointer; width: 160px;">
+                <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none;">📅</span>
+            </div>
         </div>` : '';
 
-    const isOverrideActive = state.overrides?.[qLower];
-
     return `
-    <div class="quarter-section collapsible" id="${q}-section">
-        <div class="quarter-header" onclick="toggleQuarter('${q}')">
-            <h3>
-                <span class="collapse-icon" id="${q}-icon">▼</span>
-                ${config.title}
-            </h3>
+    <div class="quarter-section-tabbed" id="${q}-section">
+        <div class="quarter-header-tabbed">
+            <h3>${config.title}</h3>
             <div class="header-info" style="display: flex; gap: 15px; align-items: center;">
                 <button class="override-btn" onclick="window.toggleOverride('${qLower}', event)" 
-                        style="padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border-color); background: ${isOverrideActive ? 'rgba(231, 76, 60, 0.15)' : 'transparent'}; color: ${isOverrideActive ? 'var(--accent-red)' : 'var(--text-muted)'}; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
-                    <span>${isOverrideActive ? '🔓' : '🔒'}</span>
-                    <span>${isOverrideActive ? 'Override Active' : 'Override'}</span>
+                        style="padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border-color); background: ${state.overrides?.[qLower] ? 'rgba(231, 76, 60, 0.15)' : 'transparent'}; color: ${state.overrides?.[qLower] ? 'var(--accent-red)' : 'var(--text-muted)'}; cursor: pointer; font-size: 0.8rem; display: flex; align-items: center; gap: 5px;">
+                    <span>${state.overrides?.[qLower] ? '🔓' : '🔒'}</span>
+                    <span>${state.overrides?.[qLower] ? 'Override Active' : 'Override'}</span>
                 </button>
                 <button class="export-btn" onclick="exportQuarterDashboardToExcel('${q.toUpperCase()}', event)">📥 Export</button>
             </div>
         </div>
-        <div class="quarter-content" id="${q}-content" style="display: none;">
-            ${partialDataInput}
-            <div class="table-container">
-                <table class="data-table" id="${q}-table">
-                    <thead><tr><th class="fixed-col">Sales Rep</th>${cols.map(c => `<th class="${c.customClass || ''}">${c.label}</th>`).join('')}</tr></thead>
-                    <tbody id="${q}-tbody">${rows}<tr class="totals-row"><td class="fixed-col"><strong>TOTAL</strong></td>${cols.map(c => tCell(c)).join('')}</tr></tbody>
-                </table>
-            </div>
+        ${partialDataInput}
+        <div class="table-container">
+            <table class="data-table" id="${q}-table">
+                <thead><tr><th class="fixed-col">Sales Rep</th>${cols.map(c => `<th class="${c.customClass || ''}">${c.label}</th>`).join('')}</tr></thead>
+                <tbody id="${q}-tbody">${rows}<tr class="totals-row"><td class="fixed-col"><strong>TOTAL</strong></td>${cols.map(c => tCell(c)).join('')}</tr></tbody>
+            </table>
         </div>
     </div>`;
 }
 
-// --- Global Event Handlers ---
+// --- Global Handlers ---
 
-/**
- * Toggles the expansion of a quarterly section (Accordion behavior).
- */
-window.toggleQuarter = function (quarter) {
-    const allQuarters = ['q1', 'q2', 'q3', 'q4'], target = quarter.toLowerCase();
-    const content = document.getElementById(`${target}-content`), isOpen = content?.style.display === 'block';
-
-    allQuarters.forEach(q => {
-        const c = document.getElementById(`${q}-content`);
-        const i = document.getElementById(`${q}-icon`);
-        const section = document.getElementById(`${q}-section`);
-        if (c) c.style.display = 'none';
-        if (i) i.textContent = '▶';
-        if (section) section.classList.add('collapsed');
+window.switchQuarterTab = function (quarter) {
+    const all = ['q1', 'q2', 'q3', 'q4'];
+    const target = quarter.toLowerCase();
+    all.forEach(q => {
+        const tab = document.querySelector(`.quarter-tab[onclick="switchQuarterTab('${q}')"]`);
+        const content = document.getElementById(`${q}-tab-content`);
+        if (tab) tab.classList.toggle('active', q === target);
+        if (content) content.classList.toggle('active', q === target);
     });
-
-    if (!isOpen && content) {
-        content.style.display = 'block';
-        const icon = document.getElementById(`${target}-icon`);
-        const section = document.getElementById(`${target}-section`);
-        if (icon) icon.textContent = '▼';
-        if (section) section.classList.remove('collapsed');
-        // Save expanded quarter to state for persistence
-        setState('dashboardExpandedQuarter', target);
-    } else {
-        // All collapsed - clear saved state
-        setState('dashboardExpandedQuarter', null);
-    }
+    state.activeQuarterTab = target;
+    setState(`dashboard_active_tab_${state.currentClusterId}`, target);
 };
 
-/**
- * Updates the partial data date for the cluster.
- */
 window.updatePartialDate = async function (dateValue) {
     if (!state.currentClusterId) return;
     try {
-        await fetch(`/api/clusters/${state.currentClusterId}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ partial_data_date: dateValue })
-        });
+        const promises = [
+            fetch(`/api/clusters/${state.currentClusterId}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ partial_data_date: dateValue })
+            })
+        ];
+        if (state.salesReps) {
+            state.salesReps.forEach(rep => {
+                promises.push(fetch(`/api/sales_reps/${rep.id}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ partial_data_date: dateValue })
+                }));
+            });
+        }
+        await Promise.all(promises);
         state.partialDataDate = dateValue;
         loadDashboardData();
     } catch (e) {
@@ -439,13 +464,12 @@ window.updatePartialDate = async function (dateValue) {
     }
 };
 
-/**
- * Syncs cell modifications to the server.
- */
 document.addEventListener('change', async (e) => {
     if (e.target.classList.contains('editable-cell')) {
         const input = e.target, repId = input.dataset.id, field = input.dataset.field;
-        let value = input.type === 'number' ? parseFloat(input.value) || 0 : input.value;
+        const originalType = input.dataset.originalType || input.type;
+        const rawValue = input.value.replace(/[$,]/g, '');
+        let value = originalType === 'number' ? parseFloat(rawValue) || 0 : input.value;
 
         input.classList.add('saving');
         try {
@@ -456,13 +480,7 @@ document.addEventListener('change', async (e) => {
             if (!res.ok) throw new Error();
             input.classList.replace('saving', 'saved');
             setTimeout(() => input.classList.remove('saved'), 1000);
-
-            // If daily rate changed, reload full dashboard to refresh all quarters
-            if (field === 'current_daily_rate') {
-                await loadDashboardData();
-            } else {
-                updateTotalsLocally(input);
-            }
+            updateTotalsLocally(input);
         } catch (error) {
             input.classList.replace('saving', 'error');
             setTimeout(() => input.classList.remove('error'), 2000);
@@ -470,154 +488,105 @@ document.addEventListener('change', async (e) => {
     }
 });
 
-/**
- * Performs local, real-time recalculations for UI responsiveness.
- */
+document.addEventListener('blur', (e) => {
+    if (e.target.classList.contains('editable-cell')) {
+        const input = e.target;
+        if (input.dataset.originalType === 'number') {
+            const numValue = parseFloat(input.value.replace(/[$,]/g, ''));
+            if (!isNaN(numValue)) input.value = formatCurrency(Math.round(numValue));
+        }
+    }
+}, true);
+
 function updateTotalsLocally(changedInput) {
-    const table = changedInput.closest('table'), tbody = table?.querySelector('tbody'), rows = tbody?.querySelectorAll('tr:not(.totals-row)');
-    if (!rows) return;
+    const repId = parseInt(changedInput.dataset.id);
+    const field = changedInput.dataset.field;
+    let newValue = parseFloat(changedInput.value.replace(/[$,]/g, '')) || 0;
 
-    const headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
-    const colIndex = {}; headers.forEach((h, i) => colIndex[h] = i);
+    const repInState = state.salesReps.find(r => r.id === repId);
+    if (!repInState) return;
+    repInState[field] = newValue;
 
-    const getVal = (row, idx) => {
-        const cell = row.cells[idx]; if (!cell) return 0;
-        const input = cell.querySelector('input');
-        return Math.round(parseFloat(input ? input.value : cell.textContent.replace(/[$,%]/g, '').replace(/,/g, '')) || 0);
-    };
+    const currentMonthIdx = new Date().getMonth();
+    const month = currentMonthIdx + 1;
+    let currQ = 'q3';
+    if (month >= 6 && month <= 8) currQ = 'q1';
+    else if (month >= 9 && month <= 11) currQ = 'q2';
+    else if (month === 12 || month <= 2) currQ = 'q3';
+    else currQ = 'q4';
 
-    const setVal = (row, idx, val, isPct = false) => {
-        const cell = row.cells[idx]; if (!cell || cell.querySelector('input')) return;
-        const formatted = isPct ? val.toFixed(1) + '%' : '$' + val.toLocaleString('en-US', { maximumFractionDigits: 0 });
-        const target = cell.querySelector('strong') || cell;
-        target.textContent = formatted;
-        if (isPct) {
-            cell.classList.remove('text-green', 'text-red', 'text-gray');
-            cell.classList.add(val > 0 ? 'text-green' : (val < 0 ? 'text-red' : 'text-gray'));
-        }
-    };
+    ['q1', 'q2', 'q3', 'q4'].forEach(qKey => {
+        const table = document.getElementById(`${qKey}-table`);
+        if (!table) return;
 
-    const currM = new Date().getMonth(), currMName = MONTH_NAMES[currM];
-    const qEstIdx = colIndex[Object.keys(colIndex).find(k => k.match(/Q[1-4] Est/))];
-    const daysLeft = (() => {
-        if (!state.partialDataDate) return 0;
-        const p = state.partialDataDate.split('/');
-        return p.length === 3 ? Math.max(0, new Date(new Date().getFullYear(), currM + 1, 0).getDate() - parseInt(p[0])) : 0;
-    })();
+        const config = getQuarterConfig(qKey, currentMonthIdx, qKey === currQ);
+        const { totals } = processQuarterData(qKey, state.salesReps, config, currentMonthIdx, state.partialDataDate);
 
-    const monthCols = headers.filter(h => h.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (Act|Est)/));
+        const rows = table.querySelectorAll('tbody tr:not(.totals-row)');
+        rows.forEach(row => {
+            const rId = parseInt(row.dataset.repId);
+            const rData = state.salesReps.find(r => r.id === rId);
+            if (!rData) return;
 
-    rows.forEach(row => {
-        const daily = colIndex['Curr Daily'] !== undefined ? getVal(row, colIndex['Curr Daily']) : 0;
-
-        if (colIndex[`${currMName} Est`] !== undefined && colIndex[`${currMName} Act`] !== undefined) {
-            setVal(row, colIndex[`${currMName} Est`], (daily * (daysLeft + 0.5)) + getVal(row, colIndex[`${currMName} Act`]));
-        }
-
-        headers.forEach((h, i) => {
-            const m = h.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) Est$/);
-            if (m && h !== `${currMName} Est`) {
-                const mIdx = MONTH_NAMES.indexOf(m[1]);
-                if (FY_MONTHS.indexOf(mIdx) > FY_MONTHS.indexOf(currM)) {
-                    setVal(row, i, daily * new Date(mIdx < 6 ? new Date().getFullYear() + 1 : new Date().getFullYear(), mIdx + 1, 0).getDate());
-                }
-            }
+            config.columns.forEach((col, idx) => {
+                const cell = row.cells[idx + 1];
+                if (!cell || cell.querySelector('input')) return;
+                const fieldKey = config.fields[col.key] || col.key;
+                let val = (fieldKey === 'current_month_est') ? (rData.current_month_est || 0) : (rData[fieldKey] || 0);
+                const target = cell.querySelector('strong') || cell;
+                target.textContent = col.type === 'percent' ? formatPercent(val) : formatCurrency(val);
+                if (col.type === 'percent') cell.className = `${getPercentColorClass(val)} ${col.customClass || ''}`;
+            });
         });
 
-        let qSum = 0; monthCols.forEach(mc => qSum += getVal(row, colIndex[mc]));
-        if (colIndex[`${currMName} Act`] !== undefined) qSum -= getVal(row, colIndex[`${currMName} Act`]);
-        const sim = colIndex['Sim'] !== undefined ? getVal(row, colIndex['Sim']) : 0;
-        qSum += sim;
-        if (qEstIdx !== undefined) setVal(row, qEstIdx, qSum);
-
-        const pe = colIndex['Prev Q Exit'] !== undefined ? getVal(row, colIndex['Prev Q Exit']) : 0;
-        const af = colIndex['Add FCT'] !== undefined ? getVal(row, colIndex['Add FCT']) : 0;
-        const te = qSum + af;
-        if (colIndex['Total Exit'] !== undefined) setVal(row, colIndex['Total Exit'], te);
-
-        if (colIndex['QoQ'] !== undefined && pe > 0) setVal(row, colIndex['QoQ'], ((qSum / pe) - 1) * 100, true);
-        if (colIndex['QoQ+'] !== undefined && pe > 0) setVal(row, colIndex['QoQ+'], ((te / pe) - 1) * 100, true);
-    });
-
-    // Update Totals row (Aggregate each column)
-    const totalsRow = table.querySelector('.totals-row');
-    headers.forEach((h, i) => {
-        if (i === 0 || h.includes('%')) return;
-        let sum = 0; rows.forEach(r => sum += getVal(r, i));
-        setVal(totalsRow, i, sum);
+        const totalsRow = table.querySelector('.totals-row');
+        if (totalsRow) {
+            config.columns.forEach((col, idx) => {
+                const cell = totalsRow.cells[idx + 1];
+                if (!cell) return;
+                const target = cell.querySelector('strong') || cell;
+                const val = totals[col.key] || 0;
+                target.textContent = col.type === 'percent' ? formatPercent(val) : formatCurrency(val);
+                if (col.type === 'percent') cell.className = `${getPercentColorClass(val)} ${col.customClass || ''}`;
+            });
+        }
     });
 }
 
-/**
- * Toggles the override lock for a quarter.
- * Automatically expands the quarter section to show editable fields.
- */
 window.toggleOverride = (q, e) => {
     e.stopPropagation();
-    const currentOverrides = state.overrides || {};
-    currentOverrides[q] = !currentOverrides[q];
+    const currentOverrides = { ...(state.overrides || {}), [q]: !(state.overrides?.[q]) };
     setState('overrides', currentOverrides);
-
-    // Ensure the quarter section is expanded when override is activated
-    const content = document.getElementById(`${q}-content`);
-    if (content && content.style.display !== 'block') {
-        window.toggleQuarter(q);
-    } else {
-        // If already expanded, just refresh the data
-        refreshQuarterData();
-    }
+    setTimeout(() => refreshQuarterData(), 0);
 };
 
 async function refreshQuarterData() {
     if (!state.currentClusterId) return;
-    const openQ = ['q1', 'q2', 'q3', 'q4'].find(q => document.getElementById(`${q}-content`)?.style.display === 'block');
     const scroll = window.scrollY;
     await loadDashboardData();
-    if (openQ) window.toggleQuarter(openQ);
     window.scrollTo(0, scroll);
 }
 
-/**
- * Exports the visible data for a specific quarter from the dashboard to Excel.
- */
 window.exportQuarterDashboardToExcel = function (quarter, event) {
     if (event) event.stopPropagation();
+    const table = document.getElementById(`${quarter.toLowerCase()}-table`);
+    if (!table || typeof XLSX === 'undefined') return;
 
-    const qLower = quarter.toLowerCase();
-    const table = document.getElementById(`${qLower}-table`);
-    if (!table) {
-        console.error('Table not found for quarter:', quarter);
-        return;
-    }
-
-    // Get cluster name from dropdown
     const clusterSelect = document.getElementById('cluster-select');
     const clusterName = clusterSelect?.options[clusterSelect.selectedIndex]?.text || 'Cluster';
+    const shortDate = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const filename = `${clusterName}_${quarter}_Breakdown_${shortDate}.xlsx`;
 
-    // Format short date as YYYYMMDD
-    const now = new Date();
-    const shortDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-
-    // Extract data from table
-    const headers = [];
-    const headerRow = table.querySelector('thead tr');
-    headerRow.querySelectorAll('th').forEach(th => headers.push(th.textContent.trim()));
-
-    const data = [];
-    const rows = table.querySelectorAll('tbody tr');
-    rows.forEach(row => {
-        const rowData = {};
-        const cells = row.querySelectorAll('td');
-        cells.forEach((cell, idx) => {
-            const input = cell.querySelector('input');
-            const value = input ? input.value : cell.textContent.trim();
-            rowData[headers[idx]] = value;
+    try {
+        const clone = table.cloneNode(true);
+        const originalInputs = table.querySelectorAll('input');
+        const cloneInputs = clone.querySelectorAll('input');
+        originalInputs.forEach((input, idx) => {
+            cloneInputs[idx].parentElement.textContent = input.value;
         });
-        data.push(rowData);
-    });
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, `${quarter} Dashboard`);
-    XLSX.writeFile(wb, `${clusterName}-${quarter}-Dashboard-${shortDate}.xlsx`);
+        const wb = XLSX.utils.table_to_book(clone, { sheet: "Sheet 1" });
+        XLSX.writeFile(wb, filename);
+    } catch (err) {
+        console.error(err);
+    }
 };

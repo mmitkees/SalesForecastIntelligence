@@ -167,10 +167,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         setState('currentClusterId', parseInt(savedClusterId));
     }
 
-    // Parallel load of UI framework and data
-    await loadView(savedView);
+    // Load Context FIRST (Fiscal Years & Clusters)
+    // This ensures state.currentClusterId is validated/set before the view tries to use it
     await loadFiscalYears();
     await loadClusters();
+
+    // Load View LAST
+    await loadView(savedView);
 
     // Hide admin nav for regular users
     updateNavVisibility(user);

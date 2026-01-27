@@ -591,6 +591,10 @@ def get_dashboard(cluster_id):
             "current_month_est": safe_float(sr.current_month_est),
             "last_week_daily_rate": safe_float(sr.last_week_daily_rate),
             "current_daily_rate": safe_float(sr.current_daily_rate),
+            "q1_simulation": safe_float(sr.q1_simulation),
+            "q2_simulation": safe_float(sr.q2_simulation),
+            "q3_simulation": safe_float(sr.q3_simulation),
+            "q4_simulation": safe_float(sr.q4_simulation),
             "simulation": safe_float(sr.simulation),
 
             # Q3 Metrics
@@ -765,6 +769,10 @@ def update_sales_rep(rep_id):
     # Calculation Parameters
     rep.last_week_daily_rate = safe_float(data.get('last_week_daily_rate', rep.last_week_daily_rate))
     rep.current_daily_rate = safe_float(data.get('current_daily_rate', rep.current_daily_rate))
+    rep.q1_simulation = safe_float(data.get('q1_simulation', rep.q1_simulation))
+    rep.q2_simulation = safe_float(data.get('q2_simulation', rep.q2_simulation))
+    rep.q3_simulation = safe_float(data.get('q3_simulation', rep.q3_simulation))
+    rep.q4_simulation = safe_float(data.get('q4_simulation', rep.q4_simulation))
     rep.simulation = safe_float(data.get('simulation', rep.simulation))
     
     # Monthly Actuals
@@ -800,7 +808,12 @@ def update_sales_rep(rep_id):
         "id": rep.id, 
         "name": rep.name,
         "current_month_est": rep.current_month_est,
-        "q3_exit": rep.q3_exit
+        "q3_exit": rep.q3_exit,
+        "q1_simulation": rep.q1_simulation,
+        "q2_simulation": rep.q2_simulation,
+        "q3_simulation": rep.q3_simulation,
+        "q4_simulation": rep.q4_simulation,
+        "simulation": rep.simulation
     })
 
 
@@ -1175,9 +1188,11 @@ def update_from_workloads(rep, db):
     rep.q3_exit = calculated_q3
     rep.q4_exit = calculated_q4
     
-    # Apply Simulation to Current and Next Quarter only
-    for q in [current_q, next_q]:
-        setattr(rep, f"{q}_exit", getattr(rep, f"{q}_exit") + (rep.simulation or 0))
+    # Apply Simulation to all quarters
+    for q in ['q1', 'q2', 'q3', 'q4']:
+        # Use quarter-specific simulation, or fallback to legacy simulation field
+        sim_val = getattr(rep, f"{q}_simulation") or rep.simulation or 0
+        setattr(rep, f"{q}_exit", getattr(rep, f"{q}_exit") + sim_val)
 
     # --- 4. Persist Workload Totals ---
     for q in q_order:
@@ -1469,7 +1484,7 @@ def upload_sales_data():
             rep.q2_exit = q2_exit
             rep.last_week_daily_rate = last_week_daily_rate
             rep.current_daily_rate = current_daily_rate
-            rep.simulation = simulation
+            rep.simulation = get_float(row, ['simulation'], rep.simulation)
             
             # Monthly actuals - capture what's in the file
             rep.dec = december_actual
@@ -1624,4 +1639,6 @@ def get_region_analytics():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Default to True for dev, can be overridden by FLASK_DEBUG=False in scripts
+    debug_mode = os.environ.get('FLASK_DEBUG', 'True').lower() in ('true', '1', 't')
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
