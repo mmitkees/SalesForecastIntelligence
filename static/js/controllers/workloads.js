@@ -44,7 +44,7 @@ export async function loadWorkloadsData() {
 
 /**
  * Orchestrates the rendering of all quarterly workload tables.
- * Handles rolling order, initial expansion, and data distribution.
+ * Handles quarterly tabs and data distribution.
  */
 export function reRenderWorkloadTables() {
     const container = document.getElementById('workloads-quarters-container');
@@ -60,7 +60,7 @@ export function reRenderWorkloadTables() {
         if (!w.quarter) w.quarter = 'Q3';
     });
 
-    // Rolling Order Logic: Start with current quarter
+    // Determine current quarter for default tab
     const month = new Date().getMonth() + 1;
     let currentQuarter = 'Q3';
     if (month >= 6 && month <= 8) currentQuarter = 'Q1';
@@ -68,10 +68,11 @@ export function reRenderWorkloadTables() {
     else if (month === 12 || month <= 2) currentQuarter = 'Q3';
     else if (month >= 3 && month <= 5) currentQuarter = 'Q4';
 
-    const allQuarters = ['Q1', 'Q2', 'Q3', 'Q4'];
-    const idx = allQuarters.indexOf(currentQuarter);
-    const displayOrder = [...allQuarters.slice(idx), ...allQuarters.slice(0, idx)];
+    const clusterKey = `workloads_active_tab_${state.currentClusterId}`;
+    const savedTab = state[clusterKey] || currentQuarter;
+    state.activeWorkloadTab = savedTab;
 
+    const allQuarters = ['Q1', 'Q2', 'Q3', 'Q4'];
     const quarterConfigs = {
         'Q1': { title: 'Q1 (Jun - Jul - Aug)', months: ['Jun', 'Jul', 'Aug'] },
         'Q2': { title: 'Q2 (Sep - Oct - Nov)', months: ['Sep', 'Oct', 'Nov'] },
@@ -79,53 +80,44 @@ export function reRenderWorkloadTables() {
         'Q4': { title: 'Q4 (Mar - Apr - May)', months: ['Mar', 'Apr', 'May'] }
     };
 
-    // 1. Build skeleton
-    container.innerHTML = displayOrder.map(q => {
+    const quarterContent = {};
+    allQuarters.forEach(q => {
         const config = quarterConfigs[q];
-        return renderQuarterSection(q, config.title, config.months);
-    }).join('');
+        quarterContent[q] = renderQuarterSection(q, config.title, config.months);
+    });
+
+    container.innerHTML = `
+        <div class="quarter-tabs-container">
+            <div class="quarter-tabs">
+                ${allQuarters.map(q => `
+                    <button class="quarter-tab ${state.activeWorkloadTab === q ? 'active' : ''}" onclick="switchWorkloadTab('${q}')">${q}</button>
+                `).join('')}
+            </div>
+            ${allQuarters.map(q => `
+                <div class="quarter-tab-content ${state.activeWorkloadTab === q ? 'active' : ''}" id="${q.toLowerCase()}-tab-content">
+                    ${quarterContent[q]}
+                </div>
+            `).join('')}
+        </div>
+    `;
 
     // 2. Populate rows
-    displayOrder.forEach(q => {
+    allQuarters.forEach(q => {
         const tbodyId = `workloads-tbody-${q.toLowerCase()}`;
         const data = workloads.filter(w => w.quarter === q);
         renderWorkloadTable(data, tbodyId, q);
     });
-
-    // 3. Initial state: Expand saved quarter or current quarter
-    const savedExpandedQuarter = state.workloadsExpandedQuarter;
-    const quarterToExpand = savedExpandedQuarter || currentQuarter;
-
-    displayOrder.forEach(q => {
-        const qLower = q.toLowerCase();
-        const content = document.getElementById(`${qLower}-content`);
-        const icon = document.getElementById(`${qLower}-icon`);
-        const header = document.querySelector(`#${qLower}-section`);
-
-        if (q === quarterToExpand) {
-            if (content) content.style.display = 'block';
-            if (icon) icon.textContent = '▼';
-            if (header) header.classList.remove('collapsed');
-        } else {
-            if (content) content.style.display = 'none';
-            if (icon) icon.textContent = '▶';
-            if (header) header.classList.add('collapsed');
-        }
-    });
 }
 
 /**
- * Generates the HTML shell for a quarterly section.
+ * Generates the HTML shell for a quarterly section (Tabbed style).
  */
 function renderQuarterSection(quarter, title, months) {
     const qLower = quarter.toLowerCase();
     return `
-    <div class="quarter-section collapsible" id="${qLower}-section">
-        <div class="quarter-header" onclick="toggleQuarterSection('${qLower}')">
-            <h3>
-                <span class="collapse-icon" id="${qLower}-icon">▼</span>
-                ${title}
-            </h3>
+    <div class="quarter-section-tabbed" id="${qLower}-section">
+        <div class="quarter-header-tabbed">
+            <h3>${title}</h3>
             <div class="header-info" style="display: flex; gap: 15px; align-items: center;">
                 <span class="workload-count" id="${qLower}-count">0 workloads</span>
                 <span id="${qLower}-sum-won" style="font-weight: bold; color: #10b981;">WON: $0</span>
@@ -134,34 +126,32 @@ function renderQuarterSection(quarter, title, months) {
                 <button class="export-btn" onclick="exportQuarterWorkloadToExcel('${quarter}', event)">📥 Export</button>
             </div>
         </div>
-        <div class="quarter-content" id="${qLower}-content">
-            <div class="table-container">
-                <table class="data-table workloads-table" id="workloads-table-${qLower}">
-                    <thead>
-                        <tr>
-                            <th class="sortable" data-sort="forecast">Forecast ↕</th>
-                            <th class="sortable" data-sort="account">Account ↕</th>
-                            <th class="sortable" data-sort="sales_rep">Rep ↕</th>
-                            <th class="sortable" data-sort="country">Country ↕</th>
-                            <th class="sortable" data-sort="type">Type ↕</th>
-                            <th class="sortable" data-sort="workload">Workload ↕</th>
-                            <th class="sortable" data-sort="opt_id">Opt-ID ↕</th>
-                            <th class="sortable" data-sort="start_date">Start ↕</th>
-                            <th class="month-col">${months[0]}</th>
-                            <th class="month-col">${months[1]}</th>
-                            <th class="month-col">${months[2]}</th>
-                            <th class="sortable total-col" data-sort="total">Total ↕</th>
-                            <th class="icon-col">💬</th>
-                            <th class="icon-col"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="workloads-tbody-${qLower}">
-                        <tr>
-                            <td colspan="14" class="loading">Loading ${quarter} data...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+        <div class="table-container">
+            <table class="data-table workloads-table" id="workloads-table-${qLower}">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="forecast">Forecast ↕</th>
+                        <th class="sortable" data-sort="account">Account ↕</th>
+                        <th class="sortable" data-sort="sales_rep">Rep ↕</th>
+                        <th class="sortable" data-sort="country">Country ↕</th>
+                        <th class="sortable" data-sort="type">Type ↕</th>
+                        <th class="sortable" data-sort="workload">Workload ↕</th>
+                        <th class="sortable" data-sort="opt_id">Opt-ID ↕</th>
+                        <th class="sortable" data-sort="start_date">Start ↕</th>
+                        <th class="month-col">${months[0]}</th>
+                        <th class="month-col">${months[1]}</th>
+                        <th class="month-col">${months[2]}</th>
+                        <th class="sortable total-col" data-sort="total">Total ↕</th>
+                        <th class="icon-col">💬</th>
+                        <th class="icon-col"></th>
+                    </tr>
+                </thead>
+                <tbody id="workloads-tbody-${qLower}">
+                    <tr>
+                        <td colspan="14" class="loading">Loading ${quarter} data...</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     </div>`;
 }
@@ -548,37 +538,23 @@ window.openWorkloadDetailsModal = function (workloadId, accountName) {
 };
 
 /**
- * Toggles a quarterly workload section (accordion logic).
+ * Handles switching between quarterly tabs.
  */
-window.toggleQuarterSection = function (quarter) {
-    const qLower = quarter.toLowerCase();
-    const allQuarters = ['q1', 'q2', 'q3', 'q4'];
+window.switchWorkloadTab = function (quarter) {
+    const all = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const target = quarter.toUpperCase();
 
-    const targetContent = document.getElementById(`${qLower}-content`);
-    const isCurrentlyOpen = targetContent && targetContent.style.display === 'block';
-
-    allQuarters.forEach(q => {
-        const content = document.getElementById(`${q}-content`);
-        const icon = document.getElementById(`${q}-icon`);
-        const section = document.getElementById(`${q}-section`);
-
-        if (content) content.style.display = 'none';
-        if (icon) icon.textContent = '▶';
-        if (section) section.classList.add('collapsed');
+    all.forEach(q => {
+        const qLower = q.toLowerCase();
+        const tab = document.querySelector(`.quarter-tab[onclick="switchWorkloadTab('${q}')"]`);
+        const content = document.getElementById(`${qLower}-tab-content`);
+        if (tab) tab.classList.toggle('active', q === target);
+        if (content) content.classList.toggle('active', q === target);
     });
 
-    if (!isCurrentlyOpen && targetContent) {
-        targetContent.style.display = 'block';
-        const icon = document.getElementById(`${qLower}-icon`);
-        const section = document.getElementById(`${qLower}-section`);
-        if (icon) icon.textContent = '▼';
-        if (section) section.classList.remove('collapsed');
-        // Save expanded quarter to state
-        setState('workloadsExpandedQuarter', quarter.toUpperCase());
-    } else {
-        // All collapsed - clear the saved state
-        setState('workloadsExpandedQuarter', null);
-    }
+    state.activeWorkloadTab = target;
+    const clusterKey = `workloads_active_tab_${state.currentClusterId}`;
+    setState(clusterKey, target);
 };
 
 /**
