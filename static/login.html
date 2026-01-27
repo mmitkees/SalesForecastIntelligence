@@ -154,6 +154,38 @@
         const errorDiv = document.getElementById('error-message');
         const loginBtn = document.getElementById('login-btn');
 
+        // Environment Detection for Login Page
+        function displayEnvironmentBadge() {
+            const header = document.querySelector('.login-header h1');
+            if (!header) return;
+
+            const hostname = window.location.hostname;
+            const isDev = hostname === '129.151.152.53' || hostname === 'localhost' || hostname === '127.0.0.1';
+            const isProd = hostname === '129.151.159.172' || hostname.includes('salesforecast');
+
+            if (isDev) {
+                const badge = document.createElement('span');
+                badge.className = 'env-badge';
+                badge.textContent = 'DEV';
+                badge.style.display = 'inline-block';
+                badge.style.marginLeft = '10px';
+                badge.style.marginTop = '0';
+                badge.style.verticalAlign = 'middle';
+                header.appendChild(badge);
+            } else if (isProd) {
+                const badge = document.createElement('span');
+                badge.className = 'env-badge env-badge-prod';
+                badge.textContent = 'PROD';
+                badge.style.display = 'inline-block';
+                badge.style.marginLeft = '10px';
+                badge.style.marginTop = '0';
+                badge.style.verticalAlign = 'middle';
+                header.appendChild(badge);
+            }
+        }
+
+        displayEnvironmentBadge();
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
 
