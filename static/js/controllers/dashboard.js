@@ -478,6 +478,17 @@ document.addEventListener('change', async (e) => {
                 body: JSON.stringify({ [field]: value })
             });
             if (!res.ok) throw new Error();
+
+            // Get the updated data from backend response
+            const updatedRepData = await res.json();
+
+            // Update the rep in state with backend-calculated values
+            const repInState = state.salesReps.find(r => r.id === parseInt(repId));
+            if (repInState && updatedRepData) {
+                // Update with all backend-calculated fields
+                Object.assign(repInState, updatedRepData);
+            }
+
             input.classList.replace('saving', 'saved');
             setTimeout(() => input.classList.remove('saved'), 1000);
             updateTotalsLocally(input);
