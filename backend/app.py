@@ -1167,7 +1167,12 @@ def update_from_workloads(rep, db):
     # Determine which month field to use for current month (est vs actual)
     def get_month_value(month_idx, field_name):
         if month_idx == current_month:
-            return rep.current_month_est or getattr(rep, field_name) or 0
+            # For current month, use estimate (which includes actual + projection)
+            # Only fall back to actual if estimate hasn't been calculated yet
+            if rep.current_month_est is not None:
+                return rep.current_month_est
+            # Fallback to actual if no estimate exists
+            return getattr(rep, field_name) or 0
         return getattr(rep, field_name) or 0
     
     
